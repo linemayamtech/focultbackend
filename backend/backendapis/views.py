@@ -39,6 +39,7 @@ def Org_register(request):
             o_pin_no = data.get('o_pin_no')
 
             otp = generateOTP()
+
             
             # Save OTP in cache with a timeout of 30 seconds
             cache.set(f"otp_{o_email}", otp, timeout=30)  # Key is based on email
@@ -76,6 +77,32 @@ def generateOTP():
     OTP = "".join(random.choice(digits) for _ in range(5))
     return OTP
 
+@api_view(['POST'])
+@permission_classes([AllowAny])
+def resend_otp(request):
+    # Check if user data exists in the session
+    user_data = request.session.get('user_data')
+
+    if not user_data:
+        return Response({"message": "Session expired. Please fill out the form again."}, status=400)
+
+    o_name = user_data.get('o_name')
+    o_email = user_data.get('o_email')
+
+    # Generate a new OTP
+    otp = generateOTP()
+    
+    # Save the new OTP in the cache with a 30-second timeout
+    cache.set(f"otp_{o_email}", otp, timeout=30)
+
+    # Send the OTP to the user's email
+    subject = 'Focult - Resend OTP Verification'
+    message = f"Hi {o_name}, here is your new OTP for verification: {otp}."
+    email_from = settings.EMAIL_HOST_USER
+    recipient_list = [o_email]
+    send_mail(subject, message, email_from, recipient_list)
+
+    return Response({"message": "New OTP sent successfully. Please check your email."}, status=200)
 
 
 @api_view(['POST'])
@@ -127,7 +154,6 @@ def verify_otp(request):
             return Response({"message": f"Error occurred while creating the user: {str(e)}"}, status=500)
     else:
         return Response({"message": "OTP is invalid."}, status=400)
-
 
 
 @api_view(['POST'])
