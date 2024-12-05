@@ -12,6 +12,8 @@ from .models import *
 from rest_framework_simplejwt.tokens import RefreshToken
 from django.contrib.auth.hashers import make_password
 from .models import Organization
+from django.core.cache import cache
+
 
 @api_view(['POST', 'GET'])
 @permission_classes([AllowAny])
@@ -37,7 +39,10 @@ def Org_register(request):
             o_pin_no = data.get('o_pin_no')
 
             otp = generateOTP()
-            request.session['tempOTP'] = otp
+            
+            # Save OTP in cache with a timeout of 30 seconds
+            cache.set(f"otp_{o_email}", otp, timeout=30)  # Key is based on email
+            
             request.session['user_data'] = {
                 'o_name': o_name,
                 'o_email': o_email,
@@ -49,7 +54,6 @@ def Org_register(request):
                 'o_city': o_city,
                 'o_pin_no': o_pin_no,
                 'o_password': o_password,
-
             }
 
             subject = 'Focult - OTP Verification'
@@ -58,19 +62,20 @@ def Org_register(request):
             recipient_list = [o_email]
             send_mail(subject, message, email_from, recipient_list)
 
-            return JsonResponse({'success': 'OTP sent successfully. Please verify.', 'redirect_url': '/api/verify_otp/'}, status=200)
+            return JsonResponse({'success': 'OTP sent successfully. Please verify.'}, status=200)
         else:
             return JsonResponse({'error': serializer.errors}, status=400)
 
     return JsonResponse({'error': 'Invalid HTTP method.'}, status=405)
 
 
+
 def generateOTP():
+    import random  # Ensure import for random
     digits = "0123456789"
-    OTP = ""
-    for i in range(5):
-        OTP += digits[math.floor(random.random() * 10)]
+    OTP = "".join(random.choice(digits) for _ in range(5))
     return OTP
+
 
 
 @api_view(['POST'])
@@ -84,21 +89,21 @@ def verify_otp(request):
 
     # Retrieve the OTP from the request data
     otp = request.data.get('otp')
-    stored_otp = request.session.get('tempOTP')
+    o_email = user_data.get('o_email')
+
+    # Get the OTP from the cache
+    stored_otp = cache.get(f"otp_{o_email}")
+
+    if not stored_otp:
+        return Response({"message": "OTP has expired. Please request a new one."}, status=400)
 
     # Check if the OTP matches
     if otp == stored_otp:
-        # OTP is valid, now we need to remove the password from user_data
-        # (if the password is not part of the Organization model)
-        if 'password' in user_data:
-            del user_data['password']  # Remove the password field from user_data
-
         # Encrypt the password using make_password before saving
-        if 'o_password' in user_data:
-            user_data['o_password'] = make_password(user_data['o_password'])  # Hash the password
+        user_data['o_password'] = make_password(user_data['o_password'])
 
         try:
-            # Create the user directly in the database (now with hashed password)
+            # Create the user directly in the database
             new_user = Organization.objects.create(
                 o_name=user_data.get('o_name'),
                 o_email=user_data.get('o_email'),
@@ -109,11 +114,11 @@ def verify_otp(request):
                 o_state=user_data.get('o_state'),
                 o_city=user_data.get('o_city'),
                 o_pin_no=user_data.get('o_pin_no'),
-                o_password=user_data.get('o_password'),  # Save the hashed password
+                o_password=user_data.get('o_password'),
             )
 
-            # Clear session data after successful verification
-            del request.session['tempOTP']
+            # Clear session data and cache after successful verification
+            cache.delete(f"otp_{o_email}")
             del request.session['user_data']
 
             return Response({"message": "Registered successfully!", "user_id": new_user.id}, status=200)

@@ -55,6 +55,15 @@ MIDDLEWARE = [
     'django.middleware.common.CommonMiddleware'
 ]
 
+
+#for otp invalid after 30 seconds
+CACHES = {
+    'default': {
+        'BACKEND': 'django.core.cache.backends.locmem.LocMemCache',
+    }
+}
+
+
 ROOT_URLCONF = 'backend.urls'
 
 TEMPLATES = [
