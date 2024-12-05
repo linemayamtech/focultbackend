@@ -35,7 +35,7 @@ class Organization(models.Model):
     o_country = models.CharField(max_length=100, null=True, blank=True)
     o_state = models.CharField(max_length=100, null=True, blank=True)
     o_city = models.CharField(max_length=100, null=True, blank=True)
-    o_pin_no = models.CharField(max_length=20, null=True, unique=True)
+    o_pin_no = models.CharField(max_length=20, null=True, blank=True)
 
     # New fields for logging date and time
     created_at = models.DateTimeField(null=True, blank=True,auto_now_add=True)

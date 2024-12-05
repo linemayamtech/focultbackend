@@ -1,5 +1,8 @@
 from rest_framework import serializers
 from .models import Location, Organization
+from rest_framework import serializers
+from django.contrib.auth.hashers import check_password
+from .models import Organization
 
 class LocationSerializer(serializers.ModelSerializer):
     class Meta:
@@ -55,3 +58,26 @@ class OrganizationSerializer(serializers.ModelSerializer):
             o_pin_no=validated_data['o_pin_no']
         )
         return organization
+
+
+
+class OrganizationLoginSerializer(serializers.Serializer):
+    o_email = serializers.EmailField()
+    o_password = serializers.CharField(write_only=True)
+
+    def validate(self, data):
+        email = data.get('o_email')
+        password = data.get('o_password')
+
+        # Check if email exists in the database
+        try:
+            organization = Organization.objects.get(o_email=email)
+        except Organization.DoesNotExist:
+            raise serializers.ValidationError("Invalid email .")
+
+        # Verify password
+        if not check_password(password, organization.o_password):
+            raise serializers.ValidationError("password.")
+
+        data['organization'] = organization  # Store organization data to return in view
+        return data

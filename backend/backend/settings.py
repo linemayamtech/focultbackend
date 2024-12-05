@@ -83,11 +83,11 @@ WSGI_APPLICATION = 'backend.wsgi.application'
 DATABASES = {
     'default': {
         'ENGINE': 'django.db.backends.mysql',  # Replace with your database engine if needed
-        'NAME': 'focultData',
+        'NAME': 'focultdata',
         'USER': 'root',
-        'PASSWORD': 'Focult4all',
-        'HOST': '5.181.217.165',
-        'PORT': '3307',
+        'PASSWORD': 'root',
+        'HOST': 'localhost',
+        'PORT': '3306',
     }
 }
 
