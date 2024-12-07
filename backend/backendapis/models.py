@@ -47,7 +47,7 @@ class Organization(models.Model):
     class Meta:
         db_table = "organization"
 
-class Productivity(models.Model):
+class AppProductivity(models.Model):
     PRODUCTIVE = 'productive'
     UNPRODUCTIVE = 'unproductive'
     NEUTRAL = 'neutral'

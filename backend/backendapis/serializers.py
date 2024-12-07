@@ -1,5 +1,5 @@
 from rest_framework import serializers
-from .models import Location, Organization,Productivity
+from .models import Location, Organization,AppProductivity
 from rest_framework import serializers
 from django.contrib.auth.hashers import check_password
 from .models import Organization
@@ -84,7 +84,7 @@ class OrganizationLoginSerializer(serializers.Serializer):
 
 
 from rest_framework import serializers
-from .models import Productivity, Organization
+from .models import AppProductivity, Organization
 
 # class ProductivitySerializers(serializers.ModelSerializer):
 #     # Adding an extra field to the serializer
@@ -123,9 +123,9 @@ from .models import Productivity, Organization
 #         return Productivity.objects.create(organization=organization, **validated_data)
 
 
-class ProductivitySerializers(serializers.ModelSerializer):
+class AppProductivitySerializers(serializers.ModelSerializer):
     organization_name = serializers.ReadOnlyField(source='organization.o_name')
 
     class Meta:
-        model = Productivity    
+        model = AppProductivity    
         fields = ['id', 'organization', 'organization_name', 'app_name', 'app_state']

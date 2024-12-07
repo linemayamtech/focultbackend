@@ -1,10 +1,10 @@
-from .serializers import OrganizationSerializer, OrganizationLoginSerializer, ProductivitySerializers
+from .serializers import OrganizationSerializer, OrganizationLoginSerializer, AppProductivitySerializers
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.response import Response
 from django.core.mail import send_mail
 from django.conf import settings
 from django.http import JsonResponse
-from .models import Location, Organization, Productivity
+from .models import Location, Organization, AppProductivity
 from rest_framework.permissions import AllowAny
 from rest_framework_simplejwt.tokens import RefreshToken, AccessToken
 from django.contrib.auth.hashers import make_password
@@ -16,7 +16,7 @@ from rest_framework import status
 from rest_framework.permissions import AllowAny
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.response import Response
-from .serializers import OrganizationLoginSerializer, ProductivitySerializers
+from .serializers import OrganizationLoginSerializer, AppProductivitySerializers
 
 
 
@@ -195,8 +195,8 @@ def login_organization(request):
 
 
 
-#Productivity Section
-class GetProductivityAPIView(APIView):
+#AppProductivity Section
+class GetAppProductivityAPIView(APIView):
     permission_classes = [AllowAny]
     
     def initial(self, request, *args, **kwargs):
@@ -244,16 +244,16 @@ class GetProductivityAPIView(APIView):
             return Response({"error": "Organization not found."}, status=status.HTTP_404_NOT_FOUND)
 
         # Retrieve all the productivity records associated with the organization
-        productivity_data = Productivity.objects.filter(organization=organization)
+        productivity_data = AppProductivity.objects.filter(organization=organization)
 
         # Use the ProductivitySerializers to serialize the data
-        serializer = ProductivitySerializers(productivity_data, many=True)
+        serializer = AppProductivitySerializers(productivity_data, many=True)
 
         return Response(serializer.data, status=status.HTTP_200_OK)
 
 
 
-class AddProductivityAPIView(APIView):
+class AddAppProductivityAPIView(APIView):
     permission_classes = [AllowAny]
     
     def initial(self, request, *args, **kwargs):
@@ -312,7 +312,7 @@ class AddProductivityAPIView(APIView):
             return Response({"error": "Organization not found."}, status=status.HTTP_404_NOT_FOUND)
 
         # Continue with serializer logic to save organization data
-        serializer = ProductivitySerializers(data=request.data)
+        serializer = AppProductivitySerializers(data=request.data)
         if serializer.is_valid():
             serializer.save(organization=organization)
             return Response(serializer.data, status=status.HTTP_201_CREATED)
@@ -323,7 +323,7 @@ class AddProductivityAPIView(APIView):
 
 
 
-class EditProductivityAPIView(APIView):
+class EditAppProductivityAPIView(APIView):
     permission_classes = [AllowAny]
 
     def initial(self, request, *args, **kwargs):
@@ -367,7 +367,7 @@ class EditProductivityAPIView(APIView):
 
         try:
             # Retrieve the data item by the ID passed in the URL
-            data = Productivity.objects.get(id=data_id_from_url)
+            data = AppProductivity.objects.get(id=data_id_from_url)
 
             # Ensure the data belongs to the organization from the token
             if data.organization_id != organization_id_from_request:
@@ -380,7 +380,7 @@ class EditProductivityAPIView(APIView):
 
             return Response({"message": "Data updated successfully."}, status=status.HTTP_200_OK)
 
-        except Productivity.DoesNotExist:
+        except AppProductivity.DoesNotExist:
             return Response({"error": "Data not found."}, status=status.HTTP_404_NOT_FOUND)
 
         except Exception as e:
@@ -389,7 +389,7 @@ class EditProductivityAPIView(APIView):
 
 
 
-class DeleteProductivityAPIView(APIView):
+class DeleteAppProductivityAPIView(APIView):
     permission_classes = [AllowAny]
     
     def initial(self, request, *args, **kwargs):
@@ -429,7 +429,7 @@ class DeleteProductivityAPIView(APIView):
         
         try:
             # Retrieve the data item by the ID passed in the URL
-            data = Productivity.objects.get(id=data_id_from_url)
+            data = AppProductivity.objects.get(id=data_id_from_url)
             
             # Check if the organization_id from the token matches the organization_id of the data
             if data.organization.id != self.organization_id:
@@ -440,7 +440,7 @@ class DeleteProductivityAPIView(APIView):
 
             return Response({"message": "Data deleted successfully."}, status=status.HTTP_204_NO_CONTENT)
         
-        except Productivity.DoesNotExist:
+        except AppProductivity.DoesNotExist:
             return Response({"error": "Data not found."}, status=status.HTTP_404_NOT_FOUND)
 
 
