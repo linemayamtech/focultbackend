@@ -177,6 +177,8 @@ def login_organization(request):
 
             # Generate a refresh token for the organization
             refresh = RefreshToken.for_user(organization)
+            refresh.payload['organization_id'] = organization.id  # Add the organization_id to the token
+
 
             access_token = str(refresh.access_token)
 
@@ -194,6 +196,61 @@ def login_organization(request):
 
 
 #Productivity Section
+class GetProductivityAPIView(APIView):
+    permission_classes = [AllowAny]
+    
+    def initial(self, request, *args, **kwargs):
+        """
+        This method is executed before the actual view logic (such as get()).
+        It's a good place to validate the token.
+        """
+        # Get the Authorization header
+        auth_header = get_authorization_header(request).decode('utf-8')
+        
+        if not auth_header:
+            return Response({"error": "Authorization token is required."}, status=status.HTTP_400_BAD_REQUEST)
+        
+        try:
+            # Extract token from "Bearer <token>"
+            token = auth_header.split(" ")[1]  # [1] contains the token part
+            
+            # Verify and decode the token
+            access_token = AccessToken(token)
+            
+            # Extract information, e.g., organization_id
+            self.organization_id = access_token.get('organization_id')
+            
+            if not self.organization_id:
+                return Response({"error": "Organization ID not found in token."}, status=status.HTTP_401_UNAUTHORIZED)
+        
+        except IndexError:
+            return Response({"error": "Invalid token format. Please provide a valid 'Bearer <token>'."}, status=status.HTTP_400_BAD_REQUEST)
+        except TokenError as e:
+            return Response({"error": f"Token error: {str(e)}"}, status=status.HTTP_401_UNAUTHORIZED)
+        except Exception as e:
+            return Response({"error": f"Token decoding error: {str(e)}"}, status=status.HTTP_401_UNAUTHORIZED)
+        
+        # Call the parent class's initial() method to continue the request processing
+        super().initial(request, *args, **kwargs)
+
+    def get(self, request, *args, **kwargs):
+        """
+        Retrieve and display the data related to the organization_id from the token.
+        """
+        # Get the Organization from the token's organization_id
+        try:
+            organization = Organization.objects.get(id=self.organization_id)
+        except Organization.DoesNotExist:
+            return Response({"error": "Organization not found."}, status=status.HTTP_404_NOT_FOUND)
+
+        # Retrieve all the productivity records associated with the organization
+        productivity_data = Productivity.objects.filter(organization=organization)
+
+        # Use the ProductivitySerializers to serialize the data
+        serializer = ProductivitySerializers(productivity_data, many=True)
+
+        return Response(serializer.data, status=status.HTTP_200_OK)
+
 
 
 class AddProductivityAPIView(APIView):

@@ -1,5 +1,5 @@
 from django.urls import path
-from backendapis.views import Org_register,verify_otp,login_organization,resend_otp,AddProductivityAPIView,EditProductivityAPIView,DeleteProductivityAPIView
+from backendapis.views import Org_register,verify_otp,login_organization,resend_otp,AddProductivityAPIView,EditProductivityAPIView,DeleteProductivityAPIView,GetProductivityAPIView
 from rest_framework_simplejwt.views import TokenObtainPairView, TokenRefreshView
 
 
@@ -9,6 +9,7 @@ urlpatterns = [
     path('login/', login_organization, name='login'),
     path('resend_otp/', resend_otp, name='resend_otp'),
     path('add_productivity/', AddProductivityAPIView.as_view(),name='add'),
+    path('display_productivity/', GetProductivityAPIView.as_view(),name='display'),
     path('edit-productivity/<int:data_id>/', EditProductivityAPIView.as_view(), name='edit-data'),
     path('delete-productivity/<int:data_id>/', DeleteProductivityAPIView.as_view(), name='delete-data'),
 
