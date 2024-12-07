@@ -1,5 +1,5 @@
 from rest_framework import serializers
-from .models import Location, Organization,AppProductivity
+from .models import Location, Organization,AppProductivity,ActivityProductivity
 from rest_framework import serializers
 from django.contrib.auth.hashers import check_password
 from .models import Organization
@@ -129,3 +129,18 @@ class AppProductivitySerializers(serializers.ModelSerializer):
     class Meta:
         model = AppProductivity    
         fields = ['id', 'organization', 'organization_name', 'app_name', 'app_state']
+
+
+from rest_framework import serializers
+
+class ActivityProductivitySerializers(serializers.ModelSerializer):
+    organization_name = serializers.SerializerMethodField()  # Custom field for organization name
+
+    class Meta:
+        model = ActivityProductivity
+        fields = ['id', 'employee', 'no_of_key_press', 'no_of_mouse_press', 'no_of_mouse_scroll', 'organization_name']
+
+    def get_organization_name(self, obj):
+        # Access organization name via the employee's related organization
+        return obj.employee.o_id.o_name
+

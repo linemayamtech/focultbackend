@@ -1,10 +1,10 @@
-from .serializers import OrganizationSerializer, OrganizationLoginSerializer, AppProductivitySerializers
+from .serializers import OrganizationSerializer, OrganizationLoginSerializer, AppProductivitySerializers,ActivityProductivitySerializers
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.response import Response
 from django.core.mail import send_mail
 from django.conf import settings
 from django.http import JsonResponse
-from .models import Location, Organization, AppProductivity
+from .models import Location, Organization, AppProductivity,Employee,ActivityProductivity
 from rest_framework.permissions import AllowAny
 from rest_framework_simplejwt.tokens import RefreshToken, AccessToken
 from django.contrib.auth.hashers import make_password
@@ -445,8 +445,221 @@ class DeleteAppProductivityAPIView(APIView):
 
 
 
+#Activity Productivity section
+class DisplayActivityProductivityAPIView(APIView):
+    permission_classes = [AllowAny]
+
+    def initial(self, request, *args, **kwargs):
+        """
+        Validate the token and extract the organization_id.
+        """
+        auth_header = get_authorization_header(request).decode('utf-8')
+        if not auth_header:
+            return Response({"error": "Authorization token is required."}, status=status.HTTP_400_BAD_REQUEST)
+        
+        try:
+            token = auth_header.split(" ")[1]
+            access_token = AccessToken(token)
+            self.organization_id = access_token.get('organization_id')
+            
+            if not self.organization_id:
+                return Response({"error": "Organization ID not found in token."}, status=status.HTTP_401_UNAUTHORIZED)
+        
+        except IndexError:
+            return Response({"error": "Invalid token format. Please provide a valid 'Bearer <token>'."}, status=status.HTTP_400_BAD_REQUEST)
+        except TokenError as e:
+            return Response({"error": f"Token error: {str(e)}"}, status=status.HTTP_401_UNAUTHORIZED)
+        except Exception as e:
+            return Response({"error": f"Token decoding error: {str(e)}"}, status=status.HTTP_401_UNAUTHORIZED)
+        
+        super().initial(request, *args, **kwargs)
+
+    def get(self, request, *args, **kwargs):
+        """
+        Handles GET requests to list activity productivity data for the organization.
+        """
+        organization_id_from_token = self.organization_id
+
+        # Fetch employees belonging to the organization
+        employees = Employee.objects.filter(o_id=organization_id_from_token)
+        if not employees.exists():
+            return Response({"error": "No employees found for the organization."}, status=status.HTTP_404_NOT_FOUND)
+
+        # Fetch all activity productivity data for the employees
+        activity_productivity_data = ActivityProductivity.objects.filter(employee__in=employees)
+
+        # Serialize the data
+        serializer = ActivityProductivitySerializers(activity_productivity_data, many=True)
+        return Response(serializer.data, status=status.HTTP_200_OK)
 
 
+
+class AddActivityProductivityAPIView(APIView):
+    permission_classes = [AllowAny]
+    
+    def initial(self, request, *args, **kwargs):
+        """
+        This method is executed before the actual view logic (such as post()).
+        It's a good place to validate the token.
+        """
+        # Get the Authorization header
+        auth_header = get_authorization_header(request).decode('utf-8')
+        
+        if not auth_header:
+            return Response({"error": "Authorization token is required."}, status=status.HTTP_400_BAD_REQUEST)
+        
+        try:
+            # Extract token from "Bearer <token>"
+            token = auth_header.split(" ")[1]  # [1] contains the token part
+            
+            # Verify and decode the token
+            access_token = AccessToken(token)
+
+            # Extract organization_id from token payload
+            self.organization_id = access_token.get('organization_id')
+            
+            if not self.organization_id:
+                return Response({"error": "Organization ID not found in token."}, status=status.HTTP_401_UNAUTHORIZED)
+        
+        except IndexError:
+            return Response({"error": "Invalid token format. Please provide a valid 'Bearer <token>'."}, status=status.HTTP_400_BAD_REQUEST)
+        except TokenError as e:
+            return Response({"error": f"Token error: {str(e)}"}, status=status.HTTP_401_UNAUTHORIZED)
+        except Exception as e:
+            return Response({"error": f"Token decoding error: {str(e)}"}, status=status.HTTP_401_UNAUTHORIZED)
+        
+        # Call the parent class's initial() method to continue the request processing
+        super().initial(request, *args, **kwargs)
+
+    def post(self, request, *args, **kwargs):
+        """
+        Handles POST requests to add activity productivity data.
+        """
+        # Use the organization ID extracted from the token
+        organization_id_from_token = self.organization_id
+
+        # Ensure the employee exists in the specified organization
+        employee_id = request.data.get('employee')
+        if not employee_id:
+            return Response({"error": "Employee ID is required."}, status=status.HTTP_400_BAD_REQUEST)
+        
+        try:
+            employee = Employee.objects.get(id=employee_id, o_id=organization_id_from_token)
+        except Employee.DoesNotExist:
+            return Response({"error": "Employee not found or does not belong to the organization."}, status=status.HTTP_404_NOT_FOUND)
+
+        # Validate and save activity productivity data
+        serializer = ActivityProductivitySerializers(data=request.data)
+        if serializer.is_valid():
+            # Save with the referenced employee
+            serializer.save(employee=employee)
+            return Response(serializer.data, status=status.HTTP_201_CREATED)
+
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+
+
+class EditActivityProductivityAPIView(APIView):
+    permission_classes = [AllowAny]
+
+    def initial(self, request, *args, **kwargs):
+        """
+        Validate the token and extract the organization_id.
+        """
+        auth_header = get_authorization_header(request).decode('utf-8')
+        if not auth_header:
+            return Response({"error": "Authorization token is required."}, status=status.HTTP_400_BAD_REQUEST)
+        
+        try:
+            token = auth_header.split(" ")[1]
+            access_token = AccessToken(token)
+            self.organization_id = access_token.get('organization_id')
+            
+            if not self.organization_id:
+                return Response({"error": "Organization ID not found in token."}, status=status.HTTP_401_UNAUTHORIZED)
+        
+        except IndexError:
+            return Response({"error": "Invalid token format. Please provide a valid 'Bearer <token>'."}, status=status.HTTP_400_BAD_REQUEST)
+        except TokenError as e:
+            return Response({"error": f"Token error: {str(e)}"}, status=status.HTTP_401_UNAUTHORIZED)
+        except Exception as e:
+            return Response({"error": f"Token decoding error: {str(e)}"}, status=status.HTTP_401_UNAUTHORIZED)
+        
+        super().initial(request, *args, **kwargs)
+
+    def put(self, request, *args, **kwargs):
+        """
+        Handles PUT requests to edit an activity productivity record.
+        """
+        organization_id_from_token = self.organization_id
+
+        # Get the productivity record ID
+        productivity_id = kwargs.get('pk')
+        if not productivity_id:
+            return Response({"error": "Productivity record ID is required."}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            productivity = ActivityProductivity.objects.get(id=productivity_id, employee__o_id=organization_id_from_token)
+        except ActivityProductivity.DoesNotExist:
+            return Response({"error": "Productivity record not found or not associated with the organization."}, status=status.HTTP_404_NOT_FOUND)
+
+        # Validate and update the record
+        serializer = ActivityProductivitySerializers(productivity, data=request.data, partial=True)
+        if serializer.is_valid():
+            serializer.save()
+            return Response(serializer.data, status=status.HTTP_200_OK)
+
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+
+
+class DeleteActivityProductivityAPIView(APIView):
+    permission_classes = [AllowAny]
+
+    def initial(self, request, *args, **kwargs):
+        """
+        Validate the token and extract the organization_id.
+        """
+        auth_header = get_authorization_header(request).decode('utf-8')
+        if not auth_header:
+            return Response({"error": "Authorization token is required."}, status=status.HTTP_400_BAD_REQUEST)
+        
+        try:
+            token = auth_header.split(" ")[1]
+            access_token = AccessToken(token)
+            self.organization_id = access_token.get('organization_id')
+            
+            if not self.organization_id:
+                return Response({"error": "Organization ID not found in token."}, status=status.HTTP_401_UNAUTHORIZED)
+        
+        except IndexError:
+            return Response({"error": "Invalid token format. Please provide a valid 'Bearer <token>'."}, status=status.HTTP_400_BAD_REQUEST)
+        except TokenError as e:
+            return Response({"error": f"Token error: {str(e)}"}, status=status.HTTP_401_UNAUTHORIZED)
+        except Exception as e:
+            return Response({"error": f"Token decoding error: {str(e)}"}, status=status.HTTP_401_UNAUTHORIZED)
+        
+        super().initial(request, *args, **kwargs)
+
+    def delete(self, request, *args, **kwargs):
+        """
+        Handles DELETE requests to remove an activity productivity record.
+        """
+        organization_id_from_token = self.organization_id
+
+        # Get the productivity record ID
+        productivity_id = kwargs.get('pk')
+        if not productivity_id:
+            return Response({"error": "Productivity record ID is required."}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            productivity = ActivityProductivity.objects.get(id=productivity_id, employee__o_id=organization_id_from_token)
+        except ActivityProductivity.DoesNotExist:
+            return Response({"error": "Productivity record not found or not associated with the organization."}, status=status.HTTP_404_NOT_FOUND)
+
+        # Delete the record
+        productivity.delete()
+        return Response({"success": "Productivity record deleted successfully."}, status=status.HTTP_200_OK)
 
 
 

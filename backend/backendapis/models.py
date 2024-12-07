@@ -68,3 +68,35 @@ class AppProductivity(models.Model):
 
     def __str__(self):
         return f"{self.app_name} ({self.get_app_state_display()})"
+    
+
+
+class Employee(models.Model):
+        o_id = models.ForeignKey(Organization, on_delete=models.CASCADE)
+        e_name = models.CharField(max_length=100)
+        e_email = models.EmailField()
+        e_password = models.CharField(max_length=255)
+        e_gender = models.CharField(max_length=25)
+        e_contact = models.CharField(max_length=100)
+        e_address = models.CharField(max_length=150)
+        e_role = models.CharField(max_length=150, default='Employee')
+        monitored = models.IntegerField(default=0) 
+        def __str__(self):
+            return f'{self.id} {self.e_email} {self.e_password} {self.e_address} {self.e_contact} {self.e_gender} {self.e_role}'
+    
+        class Meta:
+         db_table = "employee"
+
+
+class ActivityProductivity(models.Model):
+    employee = models.ForeignKey(Employee, on_delete=models.CASCADE)
+    no_of_key_press = models.IntegerField(default=0)
+    no_of_mouse_press = models.IntegerField(default=0)
+    no_of_mouse_scroll = models.IntegerField(default=0)
+
+    def __str__(self):
+        return f'Employee: {self.employee.e_name}, Key Presses: {self.no_of_key_press}, Mouse Presses: {self.no_of_mouse_press}, Mouse Scrolls: {self.no_of_mouse_scroll}'
+
+    class Meta:
+        db_table = "activity_productivity"
+
