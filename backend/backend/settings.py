@@ -41,6 +41,7 @@ INSTALLED_APPS = [
     'rest_framework.authtoken',
     'corsheaders',
     'backendapis', 
+    
 ]
 
 MIDDLEWARE = [
@@ -151,6 +152,15 @@ REST_FRAMEWORK = {
         'rest_framework.permissions.IsAuthenticated',
     ],
 }
+
+
+REST_FRAMEWORK = {
+    'DEFAULT_PERMISSION_CLASSES': [
+        'rest_framework.permissions.AllowAny',
+    ],
+}
+
+
 
 EMAIL_BACKEND = 'django.core.mail.backends.smtp.EmailBackend'
 EMAIL_HOST = 'mail.focult.com'

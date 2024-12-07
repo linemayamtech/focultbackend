@@ -1,5 +1,5 @@
 from rest_framework import serializers
-from .models import Location, Organization
+from .models import Location, Organization,Productivity
 from rest_framework import serializers
 from django.contrib.auth.hashers import check_password
 from .models import Organization
@@ -81,3 +81,51 @@ class OrganizationLoginSerializer(serializers.Serializer):
 
         data['organization'] = organization  # Store organization data to return in view
         return data
+
+
+from rest_framework import serializers
+from .models import Productivity, Organization
+
+# class ProductivitySerializers(serializers.ModelSerializer):
+#     # Adding an extra field to the serializer
+#     productivity_info = serializers.SerializerMethodField()
+
+#     class Meta:
+#         model = Productivity
+#         fields = ['id', 'organization', 'app_name', 'app_state', 'productivity_info']  # include your extra field here
+
+#     def get_productivity_info(self, obj):  
+#         # This method provides additional data to the serialized output
+#         return "extra field"
+
+#     def validate(self, data):
+#         # Validation logic can be placed here
+#         # If you want to check for special characters in app_name or another field, you can modify it
+#         spl_chars = "!@#$%&*_-=+?><:;/\\|"
+#         if any(c in spl_chars for c in data['app_name']):
+#             raise serializers.ValidationError("App name should not contain special characters")
+        
+#         return data
+
+#     def create(self, validated_data):
+#         # Handle the 'organization' field properly
+#         organization_id = validated_data.get('organization', None)
+#         if not organization_id:
+#             raise serializers.ValidationError("Organization is required.")
+
+#         # Ensure the organization exists
+#         try:
+#             organization = Organization.objects.get(id=organization_id)
+#         except Organization.DoesNotExist:
+#             raise serializers.ValidationError("Organization not found.")
+        
+#         # Create the Productivity object
+#         return Productivity.objects.create(organization=organization, **validated_data)
+
+
+class ProductivitySerializers(serializers.ModelSerializer):
+    organization_name = serializers.ReadOnlyField(source='organization.o_name')
+
+    class Meta:
+        model = Productivity    
+        fields = ['id', 'organization', 'organization_name', 'app_name', 'app_state']

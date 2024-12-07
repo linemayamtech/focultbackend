@@ -46,3 +46,25 @@ class Organization(models.Model):
     
     class Meta:
         db_table = "organization"
+
+class Productivity(models.Model):
+    PRODUCTIVE = 'productive'
+    UNPRODUCTIVE = 'unproductive'
+    NEUTRAL = 'neutral'
+
+    APP_STATE_CHOICES = [
+        (PRODUCTIVE, 'Productive'),
+        (UNPRODUCTIVE, 'Un Productive'),  
+        (NEUTRAL, 'Neutral'),
+    ]
+
+    organization = models.ForeignKey(Organization, on_delete=models.CASCADE,null=True)
+    app_name = models.CharField(max_length=100)
+    app_state = models.CharField(
+        max_length=20,
+        choices=APP_STATE_CHOICES,
+        default=NEUTRAL,
+    )
+
+    def __str__(self):
+        return f"{self.app_name} ({self.get_app_state_display()})"
