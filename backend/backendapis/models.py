@@ -100,3 +100,17 @@ class ActivityProductivity(models.Model):
     class Meta:
         db_table = "activity_productivity"
 
+class OfflineData(models.Model):
+    employee = models.ForeignKey(Employee, on_delete=models.CASCADE)
+    purpose_of_offline = models.CharField(max_length=250)
+    starting_approved_by = models.CharField(max_length=50)
+    ending_approved_by = models.CharField(max_length=50,null=True)
+    starting_time = models.DateTimeField(auto_now_add=True)
+    end_time = models.DateTimeField(null=True, blank=True)  
+
+
+class Notice(models.Model):
+    organization=models.ForeignKey(Organization, on_delete=models.CASCADE)
+    title=models.CharField(max_length=70)
+    description=models.CharField(max_length=300)
+    added_time=models.DateTimeField(auto_now_add=True)

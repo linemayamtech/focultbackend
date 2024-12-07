@@ -1,4 +1,5 @@
 from .serializers import OrganizationSerializer, OrganizationLoginSerializer, AppProductivitySerializers,ActivityProductivitySerializers
+from .serializers import *
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.response import Response
 from django.core.mail import send_mail
@@ -17,6 +18,7 @@ from rest_framework.permissions import AllowAny
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.response import Response
 from .serializers import OrganizationLoginSerializer, AppProductivitySerializers
+from django.utils import timezone
 
 
 
@@ -446,6 +448,7 @@ class DeleteAppProductivityAPIView(APIView):
 
 
 #Activity Productivity section
+
 class DisplayActivityProductivityAPIView(APIView):
     permission_classes = [AllowAny]
 
@@ -664,5 +667,312 @@ class DeleteActivityProductivityAPIView(APIView):
 
 
 
+# OfflineData section
 
+class StartOfflineDataAPIView(APIView):
+    permission_classes = [AllowAny]
+    
+    def initial(self, request, *args, **kwargs):
+        auth_header = get_authorization_header(request).decode('utf-8')
+        if not auth_header:
+            return Response({"error": "Authorization token is required."}, status=status.HTTP_400_BAD_REQUEST)
+        
+        try:
+            token = auth_header.split(" ")[1]
+            access_token = AccessToken(token)
+            self.organization_id = access_token.get('organization_id')
+            if not self.organization_id:
+                return Response({"error": "Organization ID not found in token."}, status=status.HTTP_401_UNAUTHORIZED)
+        except IndexError:
+            return Response({"error": "Invalid token format. Please provide a valid 'Bearer <token>'."}, status=status.HTTP_400_BAD_REQUEST)
+        except TokenError as e:
+            return Response({"error": f"Token error: {str(e)}"}, status=status.HTTP_401_UNAUTHORIZED)
+        except Exception as e:
+            return Response({"error": f"Token decoding error: {str(e)}"}, status=status.HTTP_401_UNAUTHORIZED)
+        
+        super().initial(request, *args, **kwargs)
+
+    def post(self, request, *args, **kwargs):
+        organization_id_from_token = self.organization_id
+
+        employee_id = request.data.get('employee')
+        if not employee_id:
+            return Response({"error": "Employee ID is required."}, status=status.HTTP_400_BAD_REQUEST)
+        
+        try:
+            employee = Employee.objects.get(id=employee_id, o_id=organization_id_from_token)
+        except Employee.DoesNotExist:
+            return Response({"error": "Employee not found or does not belong to the organization."}, status=status.HTTP_404_NOT_FOUND)
+
+        # Validate and save the new offline data
+        serializer = OfflineDataSerializers(data=request.data)
+        if serializer.is_valid():
+            serializer.save(employee=employee)
+            return Response(serializer.data, status=status.HTTP_201_CREATED)
+
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+
+class EndOfflineDataAPIView(APIView):
+    permission_classes = [AllowAny]
+
+    def initial(self, request, *args, **kwargs):
+        # Extract the organization ID from the token
+        auth_header = get_authorization_header(request).decode('utf-8')
+        if not auth_header:
+            return Response({"error": "Authorization token is required."}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            token = auth_header.split(" ")[1]
+            access_token = AccessToken(token)
+            self.organization_id = access_token.get('organization_id')
+            if not self.organization_id:
+                return Response({"error": "Organization ID not found in token."}, status=status.HTTP_401_UNAUTHORIZED)
+        except IndexError:
+            return Response({"error": "Invalid token format. Please provide a valid 'Bearer <token>'."}, status=status.HTTP_400_BAD_REQUEST)
+        except TokenError as e:
+            return Response({"error": f"Token error: {str(e)}"}, status=status.HTTP_401_UNAUTHORIZED)
+        except Exception as e:
+            return Response({"error": f"Token decoding error: {str(e)}"}, status=status.HTTP_401_UNAUTHORIZED)
+
+        super().initial(request, *args, **kwargs)
+
+    def put(self, request, *args, **kwargs):
+        # Ensure `organization_id` is properly set
+        organization_id_from_token = self.organization_id
+
+        # Extract offline data ID from request data
+        offline_data_id = request.data.get('id')
+        if not offline_data_id:
+            return Response({"error": "Offline data ID is required."}, status=status.HTTP_400_BAD_REQUEST)
+
+        # Fetch the OfflineData instance
+        try:
+            offline_data = OfflineData.objects.get(id=offline_data_id, employee__o_id=organization_id_from_token)
+        except OfflineData.DoesNotExist:
+            return Response({"error": "Offline data record not found or not associated with the organization."}, status=status.HTTP_404_NOT_FOUND)
+
+        # Debugging: Check current values
+        print(f"Existing Offline Data: {offline_data.starting_approved_by}, {offline_data.ending_approved_by}")
+
+        # Update the `ending_approved_by` and `end_time` fields
+        ending_approved_by = request.data.get('ending_approved_by')
+
+        # If `ending_approved_by` is not provided, use `starting_approved_by`
+        if not ending_approved_by:
+            print("No ending_approved_by provided. Using starting_approved_by instead.")
+            offline_data.ending_approved_by = offline_data.starting_approved_by
+        else:
+            print(f"Provided ending_approved_by: {ending_approved_by}")
+            offline_data.ending_approved_by = ending_approved_by
+
+        offline_data.end_time = timezone.now()
+        offline_data.save()
+
+        # Debugging: Check values after update
+        print(f"Updated Offline Data: {offline_data.starting_approved_by}, {offline_data.ending_approved_by}")
+
+        return Response({"success": "Offline data updated successfully."}, status=status.HTTP_200_OK)
+    
+
+
+
+    from rest_framework.views import APIView
+from rest_framework.response import Response
+from rest_framework.pagination import PageNumberPagination
+from rest_framework import status
+from django.utils import timezone
+from .models import OfflineData
+from .serializers import OfflineDataSerializers
+from datetime import datetime
+
+from rest_framework.views import APIView
+from rest_framework.response import Response
+from rest_framework import status
+from rest_framework_simplejwt.tokens import AccessToken
+from rest_framework_simplejwt.exceptions import TokenError
+from rest_framework.authentication import get_authorization_header
+from .models import OfflineData
+from .serializers import OfflineDataSerializers
+from rest_framework.pagination import PageNumberPagination
+from django.utils import timezone
+from datetime import datetime
+
+# Pagination class
+class OfflineDataPagination(PageNumberPagination):
+    page_size = 6  # Display 6 records per page
+    page_size_query_param = 'page_size'
+    max_page_size = 100
+
+class OfflineDataAPIView(APIView):
+    pagination_class = OfflineDataPagination
+    print("sdfsdfsdfsdf",pagination_class)
+
+    def initial(self, request, *args, **kwargs):
+        print("dddddddddddddddddddddddddddddddddd")
+        """
+        Override the initial method to extract and verify the token
+        before processing the request.
+        """
+        auth_header = get_authorization_header(request).decode('utf-8')
+        print("WWWWww",auth_header)
+        if not auth_header:
+            return Response({"error": "Authorization token is required."}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            # Extract the token from the authorization header
+            token = auth_header.split(" ")[1]
+            print("RRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRR",token)
+            access_token = AccessToken(token)
+            # Extract the organization_id from the token
+            self.organization_id = access_token.get('organization_id')
+            if not self.organization_id:
+                return Response({"error": "Organization ID not found in token."}, status=status.HTTP_401_UNAUTHORIZED)
+        except IndexError:
+            return Response({"error": "Invalid token format. Please provide a valid 'Bearer <token>'."}, status=status.HTTP_400_BAD_REQUEST)
+        except TokenError as e:
+            return Response({"error": f"Token error: {str(e)}"}, status=status.HTTP_401_UNAUTHORIZED)
+        except Exception as e:
+            return Response({"error": f"Token decoding error: {str(e)}"}, status=status.HTTP_401_UNAUTHORIZED)
+
+        # Continue processing the request after successful token validation
+        super().initial(request, *args, **kwargs)
+
+    def get(self, request, *args, **kwargs):
+        """
+        Get the offline data based on the filter date and apply pagination.
+        """
+        # Ensure `organization_id` is properly set after validation
+        organization_id_from_token = self.organization_id
+
+        # Get the date filter from query parameters (default to today's date)
+        date_str = request.query_params.get('date', None)
+        if date_str:
+            # If a date is provided, parse it
+            try:
+                filter_date = datetime.strptime(date_str, "%Y-%m-%d").date()
+            except ValueError:
+                return Response({"error": "Invalid date format. Use 'YYYY-MM-DD'."}, status=status.HTTP_400_BAD_REQUEST)
+        else:
+            # Default to today's date if no date filter is provided
+            filter_date = timezone.now().date()
+
+        # Filter offline data by the date (today's data if no date is provided)
+        offline_data = OfflineData.objects.filter(starting_time__date=filter_date)
+
+        # Paginate the data
+        paginator = self.pagination_class()
+        result_page = paginator.paginate_queryset(offline_data, request)
+        if result_page is not None:
+            # Return paginated response with serialized data
+            return paginator.get_paginated_response(OfflineDataSerializers(result_page, many=True).data)
+
+        # If pagination isn't needed, return all data
+        return Response(OfflineDataSerializers(offline_data, many=True).data, status=status.HTTP_200_OK)
+
+
+
+
+
+# #Notice section
+
+# from rest_framework.response import Response
+# from rest_framework.views import APIView
+# from rest_framework.permissions import AllowAny
+# from rest_framework.status import HTTP_200_OK, HTTP_201_CREATED, HTTP_400_BAD_REQUEST, HTTP_404_NOT_FOUND, HTTP_204_NO_CONTENT
+# from rest_framework_simplejwt.authentication import JWTAuthentication
+# from rest_framework_simplejwt.tokens import AccessToken
+# from .models import Notice, Organization
+# from .serializers import NoticeSerializer
+# from rest_framework import status  # Importing status here
+
+# class NoticeAPIView(APIView):
+#     permission_classes = [AllowAny]  # Adjust to the needed permission class
+
+#     def initial(self, request, *args, **kwargs):
+#         """
+#         Override the initial method to extract and verify the token
+#         before processing the request.
+#         """
+#         # Get the Authorization header
+#         auth_header = get_authorization_header(request).decode('utf-8')
+
+#         if not auth_header:
+#             return Response({"error": "Authorization token is required."}, status=HTTP_400_BAD_REQUEST)
+
+#         try:
+#             # Extract token from "Bearer <token>"
+#             token = auth_header.split(" ")[1]  # [1] contains the token part
+            
+#             # Decode and verify the token using Simple JWT AccessToken
+#             access_token = AccessToken(token)
+            
+#             # Extract the organization_id from the token
+#             self.organization_id = access_token.get('organization_id')
+#             if not self.organization_id:
+#                 return Response({"error": "Organization ID not found in token."}, status=HTTP_400_BAD_REQUEST)
+        
+#         except IndexError:
+#             return Response({"error": "Invalid token format. Please provide a valid 'Bearer <token>'."}, status=HTTP_400_BAD_REQUEST)
+#         except Exception as e:
+#             return Response({"error": f"Token decoding error: {str(e)}"}, status=HTTP_400_BAD_REQUEST)
+
+#         # Continue with the parent class's initial() method
+#         super().initial(request, *args, **kwargs)
+
+#     def post(self, request, *args, **kwargs):
+#          """ Create a new notice """
+#          # Ensure the organization ID from token matches the request data
+#          organization_id_from_data = request.data.get('organization', self.organization_id)
+#          print("PPPPPPPPPPPPPPPPPPPPP",organization_id_from_data)
+     
+#          if not organization_id_from_data:
+#              # Add the organization ID from the token to the request data
+#              request.data['organization'] = self.organization_id
+     
+#          if str(self.organization_id) != str(organization_id_from_data):
+#              return Response({"error": "Organization ID mismatch with token."}, status=HTTP_400_BAD_REQUEST)
+     
+#          # Check if the organization exists
+#          try:
+#              organization = Organization.objects.get(id=self.organization_id)
+#          except Organization.DoesNotExist:
+#              return Response({"error": "Organization not found."}, status=HTTP_404_NOT_FOUND)
+     
+#          # Proceed with creating the notice and associate it with the organization
+#          serializer = NoticeSerializer(data=request.data)
+#          if serializer.is_valid():
+#              notice = serializer.save(organization=organization)  # Save the notice with the organization
+#              return Response(serializer.data, status=HTTP_201_CREATED)
+#          return Response(serializer.errors, status=HTTP_400_BAD_REQUEST)
+
+
+#     def get(self, request, *args, **kwargs):
+#         """ Get a list of all notices for the organization """
+#         notices = Notice.objects.filter(organization_id=self.organization_id)  # Filter by organization_id
+#         serializer = NoticeSerializer(notices, many=True)
+#         return Response(serializer.data, status=HTTP_200_OK)
+
+#     def put(self, request, *args, **kwargs):
+#         """ Update an existing notice """
+#         try:
+#             notice = Notice.objects.get(id=kwargs['id'], organization_id=self.organization_id)
+#         except Notice.DoesNotExist:
+#             return Response({'error': 'Notice not found'}, status=HTTP_404_NOT_FOUND)
+
+#         serializer = NoticeSerializer(notice, data=request.data, partial=True)
+#         if serializer.is_valid():
+#             serializer.save()
+#             return Response(serializer.data, status=HTTP_200_OK)
+#         return Response(serializer.errors, status=HTTP_400_BAD_REQUEST)
+
+#     def delete(self, request, *args, **kwargs):
+#         """ Delete a notice """
+#         try:
+#             notice = Notice.objects.get(id=kwargs['id'], organization_id=self.organization_id)
+#         except Notice.DoesNotExist:
+#             return Response({'error': 'Notice not found'}, status=HTTP_404_NOT_FOUND)
+
+#         notice.delete()
+#         return Response(status=HTTP_204_NO_CONTENT)
 

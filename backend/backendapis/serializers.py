@@ -3,6 +3,7 @@ from .models import Location, Organization,AppProductivity,ActivityProductivity
 from rest_framework import serializers
 from django.contrib.auth.hashers import check_password
 from .models import Organization
+from .models import *
 
 class LocationSerializer(serializers.ModelSerializer):
     class Meta:
@@ -144,3 +145,46 @@ class ActivityProductivitySerializers(serializers.ModelSerializer):
         # Access organization name via the employee's related organization
         return obj.employee.o_id.o_name
 
+class OfflineDataSerializers(serializers.ModelSerializer):
+    organization_name = serializers.SerializerMethodField()  # Custom field for organization name
+
+    class Meta:
+        model = OfflineData
+        fields = [
+            'id', 
+            'employee', 
+            'purpose_of_offline', 
+            'starting_approved_by', 
+            'ending_approved_by', 
+            'starting_time', 
+            'end_time', 
+            'organization_name'
+        ]
+
+    def get_organization_name(self, obj):
+        # Access organization name via the employee's related organization
+        return obj.employee.o_id.o_name
+
+
+
+    def validate_end_time(self, value):
+        # Optional: Prevent setting `end_time` during creation if needed
+        if not self.instance and value is not None:
+            raise serializers.ValidationError("end_time cannot be set during creation.")
+        return value
+
+
+
+#Notice section
+
+
+class NoticeSerializer(serializers.ModelSerializer):
+    organization_name = serializers.SerializerMethodField()  # Custom field for organization name
+
+    class Meta:
+        model = Notice
+        fields = ['id', 'organization', 'title', 'description', 'added_time', 'organization_name']
+
+    def get_organization_name(self, obj):
+        # Access organization name from the 'organization' field in the Notice model
+        return obj.organization.o_name    # Assuming 'Organization' model has a 'name' field
