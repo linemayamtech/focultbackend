@@ -177,11 +177,8 @@ def login_organization(request):
 
             # Generate a refresh token for the organization
             refresh = RefreshToken.for_user(organization)
-            print("refresh token:",refresh)
-            s=refresh.payload['organization_id'] = organization.id  # Add the organization_id to the token
-            print("with org id:",s)
+
             access_token = str(refresh.access_token)
-            print("access_token:",access_token)
 
             # Return the response with the generated access token
             return Response({
@@ -199,7 +196,7 @@ def login_organization(request):
 #Productivity Section
 
 
-class AddOrganizationAPIView(APIView):
+class AddProductivityAPIView(APIView):
     permission_classes = [AllowAny]
     
     def initial(self, request, *args, **kwargs):
@@ -269,7 +266,7 @@ class AddOrganizationAPIView(APIView):
 
 
 
-class EditDataAPIView(APIView):
+class EditProductivityAPIView(APIView):
     permission_classes = [AllowAny]
 
     def initial(self, request, *args, **kwargs):
@@ -335,7 +332,7 @@ class EditDataAPIView(APIView):
 
 
 
-class DeleteDataAPIView(APIView):
+class DeleteProductivityAPIView(APIView):
     permission_classes = [AllowAny]
     
     def initial(self, request, *args, **kwargs):
