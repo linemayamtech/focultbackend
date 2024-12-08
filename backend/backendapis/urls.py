@@ -7,10 +7,13 @@ urlpatterns = [
     path('verify_otp/', verify_otp, name='verify_otp'),
     path('login/', login_organization, name='login'),
     path('resend_otp/', resend_otp, name='resend_otp'),
+
+    #App Productivity
+
     path('add_productivity/', AddAppProductivityAPIView.as_view(),name='add'),
     path('display_productivity/', GetAppProductivityAPIView.as_view(),name='display'),
-    path('edit-productivity/<int:data_id>/', EditAppProductivityAPIView.as_view(), name='edit-data'),
-    path('delete-productivity/<int:data_id>/', DeleteAppProductivityAPIView.as_view(), name='delete-data'),
+    path('edit_productivity/<int:data_id>/', EditAppProductivityAPIView.as_view(), name='edit-data'),
+    path('delete_productivity/<int:data_id>/', DeleteAppProductivityAPIView.as_view(), name='delete-data'),
 
 #ActivityProductivity
     path('display_ActivityProductivity/', DisplayActivityProductivityAPIView.as_view(),name='display_Activity_Productivity'),
@@ -25,10 +28,10 @@ urlpatterns = [
 
 #Notice section
 
-    # path('add_notices/', NoticeAPIView.as_view(), name='create-notice'),  # For creating new notice
-    # path('notices/list/', NoticeAPIView.as_view(), name='get-notices'),  # For getting the list of notices
-    # path('notices/<int:id>/', NoticeAPIView.as_view(), name='update-notice'),  # For updating a specific notice
-    # path('notices/delete/<int:id>/', NoticeAPIView.as_view(), name='delete-notice'),  # For deleting a specific notice
+    path('add_notices/', NoticeAPIView.as_view(), name='create-notice'),  # For creating new notice
+    path('display_notices/', NoticeAPIView.as_view(), name='get-notices'),  # For getting the list of notices
+    path('update_notices/<int:id>/', NoticeAPIView.as_view(), name='update-notice'),  # For updating a specific notice
+    path('delete_notices/<int:id>/', NoticeAPIView.as_view(), name='delete-notice'),  # For deleting a specific notice
 
 ]
 

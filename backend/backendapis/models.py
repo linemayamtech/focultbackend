@@ -110,7 +110,7 @@ class OfflineData(models.Model):
 
 
 class Notice(models.Model):
-    organization=models.ForeignKey(Organization, on_delete=models.CASCADE)
+    organization=models.ForeignKey(Organization, on_delete=models.CASCADE, related_name="notices")
     title=models.CharField(max_length=70)
     description=models.CharField(max_length=300)
     added_time=models.DateTimeField(auto_now_add=True)
