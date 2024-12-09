@@ -188,3 +188,97 @@ class NoticeSerializer(serializers.ModelSerializer):
     def get_organization_name(self, obj):
         # Access organization name from the 'organization' field in the Notice model
         return obj.organization.o_name    # Assuming 'Organization' model has a 'name' field
+    
+
+
+# Keystroke  section
+
+
+from rest_framework import serializers
+from datetime import timedelta
+
+from backendapis.models import Keystroke
+
+def calculate_productivity(keys_pressed, mouse_clicks, mouse_movements):
+    if keys_pressed >= 40 or mouse_clicks >= 40 or mouse_movements >= 40:
+        return 100  # Maximum productivity if any of the fields is >= 40
+    productivity = 0
+    if keys_pressed < 40:
+        productivity += (keys_pressed / 40) * 100
+    if mouse_clicks < 40:
+        productivity += (mouse_clicks / 40) * 100
+    if mouse_movements < 40:
+        productivity += (mouse_movements / 40) * 100
+    return min(productivity, 100)  # Ensure productivity does not exceed 100
+
+class KeystrokeSerializer(serializers.ModelSerializer):
+    productivity = serializers.SerializerMethodField()
+    idle_time = serializers.SerializerMethodField()
+    employee_name = serializers.SerializerMethodField()  # New field for employee name
+
+    class Meta:
+        model = Keystroke
+        fields = ['id', 'activity_timestamp', 'time_range', 'captured_events', 'total_keys_pressed', 
+                  'total_mouse_clicks', 'total_mouse_movements', 'productivity','idle_time', 'employee_name']
+
+    def get_productivity(self, obj):
+        return calculate_productivity(
+            obj.total_keys_pressed, 
+            obj.total_mouse_clicks, 
+            obj.total_mouse_movements
+        )
+        
+    def get_idle_time(self, obj):
+            """
+            Calculate idle time: if all three fields (keys_pressed, mouse_clicks, mouse_movements) are 0,
+            that time period is considered idle.
+            """
+            if (
+                obj.total_keys_pressed == 0 and
+                obj.total_mouse_clicks == 0 and
+                obj.total_mouse_movements == 0
+            ):
+                return 1  # 1 minute idle time
+            return 0  # Not idle
+    
+    def get_employee_name(self, obj):
+            """
+            Retrieve the employee name (e_name) from the Employee model.
+            """
+            return obj.e_id.e_name
+    def get_session_time(self, obj):
+        """
+        Calculate the session time (time difference between the first and last entry).
+        """
+        first_entry = obj.activity_timestamp  # Assuming first entry is the current keystroke timestamp
+        last_entry = obj.activity_timestamp  # Similarly for last entry, it can be the current timestamp
+
+        # You may need to fetch the first and last entries from the database based on the e_id and date
+        # For now, I will calculate it directly based on the current keystroke
+
+        session_time = last_entry - first_entry
+        return self.format_time(session_time)
+
+    def get_work_time(self, obj):
+        """
+        Calculate work time: session time minus idle time.
+        """
+        session_time = self.get_session_time(obj)
+        idle_time = timedelta(minutes=self.get_idle_time(obj))  # Idle time is already in minutes
+        
+        work_time = session_time - idle_time
+        return self.format_time(work_time)
+
+    def format_time(self, time_delta):
+        """
+        Formats a timedelta object into a string in the format 'HH:MM:SS'.
+        """
+        if isinstance(time_delta, timedelta):
+            total_seconds = int(time_delta.total_seconds())
+            hours = total_seconds // 3600
+            minutes = (total_seconds % 3600) // 60
+            seconds = total_seconds % 60
+            return f"{hours:02}:{minutes:02}:{seconds:02}"
+        else:
+            return "00:00:00"
+

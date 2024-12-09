@@ -114,3 +114,17 @@ class Notice(models.Model):
     title=models.CharField(max_length=70)
     description=models.CharField(max_length=300)
     added_time=models.DateTimeField(auto_now_add=True)
+
+
+class Keystroke(models.Model):
+    activity_timestamp = models.DateTimeField(auto_now_add=True)
+    time_range = models.CharField(max_length=20)
+    captured_events = models.TextField()
+    total_keys_pressed = models.IntegerField()
+    total_mouse_clicks = models.IntegerField()
+    total_mouse_movements = models.IntegerField()
+    e_id = models.ForeignKey(Employee, on_delete=models.CASCADE)
+    o_id = models.ForeignKey(Organization, on_delete=models.CASCADE,null=True)
+    
+    class Meta:
+       db_table = "keystrokes" 
