@@ -136,14 +136,16 @@ from rest_framework import serializers
 
 class ActivityProductivitySerializers(serializers.ModelSerializer):
     organization_name = serializers.SerializerMethodField()  # Custom field for organization name
+    department_name = serializers.CharField(source='department.department_name', read_only=True)
 
     class Meta:
         model = ActivityProductivity
-        fields = ['id', 'employee', 'no_of_key_press', 'no_of_mouse_press', 'no_of_mouse_scroll', 'organization_name']
+        fields = ['id', 'department', 'no_of_key_press', 'no_of_mouse_press', 'no_of_mouse_scroll', 'organization_name', 'department_name']
 
     def get_organization_name(self, obj):
-        # Access organization name via the employee's related organization
-        return obj.employee.o_id.o_name
+        # Access organization name via the department's related organization
+        return obj.department.o_id.o_name
+
 
 class OfflineDataSerializers(serializers.ModelSerializer):
     organization_name = serializers.SerializerMethodField()  # Custom field for organization name

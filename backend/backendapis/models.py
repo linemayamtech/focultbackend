@@ -88,14 +88,27 @@ class Employee(models.Model):
          db_table = "employee"
 
 
+
+class Departments(models.Model):
+    o_id = models.ForeignKey(Organization, on_delete=models.CASCADE)
+    department_name = models.CharField(max_length=100)
+    manager_id = models.ForeignKey(Employee, on_delete=models.SET_NULL, null=True, related_name='managed_departments')
+    employees = models.ManyToManyField(Employee) # This handles multiple employees
+    
+    class Meta:
+        db_table = 'app_departments'
+    
+    def __str__(self):
+        return f'{self.department_name} - {self.manager_id}'
+
 class ActivityProductivity(models.Model):
-    employee = models.ForeignKey(Employee, on_delete=models.CASCADE)
+    department = models.ForeignKey(Departments, on_delete=models.CASCADE, null=True)   # ! need department id unique or not
     no_of_key_press = models.IntegerField(default=0)
     no_of_mouse_press = models.IntegerField(default=0)
     no_of_mouse_scroll = models.IntegerField(default=0)
 
     def __str__(self):
-        return f'Employee: {self.employee.e_name}, Key Presses: {self.no_of_key_press}, Mouse Presses: {self.no_of_mouse_press}, Mouse Scrolls: {self.no_of_mouse_scroll}'
+        return f'Employee: {self.department.department_name}, Key Presses: {self.no_of_key_press}, Mouse Presses: {self.no_of_mouse_press}, Mouse Scrolls: {self.no_of_mouse_scroll}'
 
     class Meta:
         db_table = "activity_productivity"

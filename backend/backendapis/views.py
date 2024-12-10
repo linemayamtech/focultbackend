@@ -1,6 +1,5 @@
 from .serializers import *
 from rest_framework.decorators import api_view, permission_classes
-from rest_framework.response import Response
 from django.core.mail import send_mail
 from django.conf import settings
 from django.http import JsonResponse
@@ -8,27 +7,37 @@ from .models import *
 from rest_framework_simplejwt.tokens import RefreshToken, AccessToken
 from django.contrib.auth.hashers import make_password
 from django.core.cache import cache
-from rest_framework.views import APIView
 from rest_framework_simplejwt.exceptions import TokenError
 from rest_framework.authentication import get_authorization_header
 from rest_framework.decorators import api_view, permission_classes
 from .serializers import OrganizationLoginSerializer, AppProductivitySerializers
-from rest_framework import status
 from django.db.models import Q
-from rest_framework.permissions import AllowAny
 from rest_framework.status import HTTP_200_OK, HTTP_201_CREATED, HTTP_400_BAD_REQUEST, HTTP_404_NOT_FOUND, HTTP_204_NO_CONTENT
-from rest_framework_simplejwt.authentication import JWTAuthentication
 from .models import Notice, Organization
 from .serializers import NoticeSerializer
-from rest_framework_simplejwt.tokens import AccessToken
 from rest_framework_simplejwt.exceptions import TokenError
 from rest_framework.authentication import get_authorization_header
 from .models import OfflineData
 from .serializers import OfflineDataSerializers
 from rest_framework.pagination import PageNumberPagination
-from django.utils import timezone
 from datetime import datetime
 from django.utils.timezone import now
+from rest_framework.authentication import get_authorization_header
+from django.conf import settings
+from datetime import datetime
+from rest_framework_simplejwt.tokens import AccessToken
+from rest_framework.authentication import get_authorization_header
+from django.utils import timezone
+from rest_framework.views import APIView
+from datetime import timedelta
+from django.db.models import Max, Min
+from rest_framework.response import Response
+from rest_framework.permissions import AllowAny
+from rest_framework import status
+from datetime import datetime, timedelta
+from django.db.models import Min, Max
+from django.utils.timezone import make_aware
+from pytz import timezone
 
 
 
@@ -366,12 +375,12 @@ class ActivityProductivityAPIView(APIView):
         Display the list of activity productivity data for the organization.
         """
         search_query = request.query_params.get('search', '').strip()
-        employees = Employee.objects.filter(o_id=self.organization_id)
+        departments = Departments.objects.filter(o_id=self.organization_id)
         
-        if not employees.exists():
-            return Response({"error": "No employees found for the organization."}, status=status.HTTP_404_NOT_FOUND)
+        if not departments.exists():
+            return Response({"error": "No departments found for the organization."}, status=status.HTTP_404_NOT_FOUND)
         
-        activity_productivity_data = ActivityProductivity.objects.filter(employee__in=employees)
+        activity_productivity_data = ActivityProductivity.objects.filter(department__in=departments)
         
         if search_query:
             if search_query.isdigit():
@@ -382,10 +391,10 @@ class ActivityProductivityAPIView(APIView):
                 )
             else:
                 activity_productivity_data = activity_productivity_data.filter(
-                    employee__e_name__icontains=search_query
+                    department__department_name__icontains=search_query
                 )
         
-        activity_productivity_data = activity_productivity_data.order_by('employee__e_name')
+        activity_productivity_data = activity_productivity_data.order_by('department__department_name')
         paginator = Pagination_activityProductivity()
         result_page = paginator.paginate_queryset(activity_productivity_data, request)
         serializer = ActivityProductivitySerializers(result_page, many=True)
@@ -395,21 +404,22 @@ class ActivityProductivityAPIView(APIView):
         """
         Add a new activity productivity record for the organization.
         """
-        employee_id = request.data.get('employee')
-        if not employee_id:
-            return Response({"error": "Employee ID is required."}, status=status.HTTP_400_BAD_REQUEST)
+        department_id = request.data.get('department')
+        if not department_id:
+            return Response({"error": "Department ID is required."}, status=status.HTTP_400_BAD_REQUEST)
         
         try:
-            employee = Employee.objects.get(id=employee_id, o_id=self.organization_id)
-        except Employee.DoesNotExist:
-            return Response({"error": "Employee not found or does not belong to the organization."}, status=status.HTTP_404_NOT_FOUND)
+            department = Departments.objects.get(id=department_id, o_id=self.organization_id)
+        except Departments.DoesNotExist:
+            return Response({"error": "Department not found or does not belong to the organization."}, status=status.HTTP_404_NOT_FOUND)
         
         serializer = ActivityProductivitySerializers(data=request.data)
         if serializer.is_valid():
-            serializer.save(employee=employee)
+            serializer.save(department=department)
             return Response(serializer.data, status=status.HTTP_201_CREATED)
         
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
 
     def put(self, request, *args, **kwargs):
         """
@@ -420,7 +430,7 @@ class ActivityProductivityAPIView(APIView):
             return Response({"error": "Productivity record ID is required."}, status=status.HTTP_400_BAD_REQUEST)
         
         try:
-            productivity = ActivityProductivity.objects.get(id=productivity_id, employee__o_id=self.organization_id)
+            productivity = ActivityProductivity.objects.get(id=productivity_id, department__o_id=self.organization_id)
         except ActivityProductivity.DoesNotExist:
             return Response({"error": "Productivity record not found or not associated with the organization."}, status=status.HTTP_404_NOT_FOUND)
         
@@ -440,13 +450,12 @@ class ActivityProductivityAPIView(APIView):
             return Response({"error": "Productivity record ID is required."}, status=status.HTTP_400_BAD_REQUEST)
         
         try:
-            productivity = ActivityProductivity.objects.get(id=productivity_id, employee__o_id=self.organization_id)
+            productivity = ActivityProductivity.objects.get(id=productivity_id, department__o_id=self.organization_id)
         except ActivityProductivity.DoesNotExist:
             return Response({"error": "Productivity record not found or not associated with the organization."}, status=status.HTTP_404_NOT_FOUND)
         
         productivity.delete()
         return Response({"success": "Productivity record deleted successfully."}, status=status.HTTP_204_NO_CONTENT)
-
 
 
 # OfflineData section
@@ -725,235 +734,275 @@ class NoticeAPIView(APIView):
 
 
 # Keystroke  section
-# from rest_framework.views import APIView
-# from rest_framework.response import Response
-# from rest_framework.authentication import get_authorization_header
-# from rest_framework import status
-# from rest_framework.exceptions import AuthenticationFailed
-# from rest_framework.permissions import IsAuthenticated
-# from django.conf import settings
-# from datetime import datetime
-# from rest_framework_simplejwt.tokens import AccessToken
-# from backendapis.models import Keystroke, Employee
-# from .serializers import KeystrokeSerializer
-# from rest_framework.authentication import TokenAuthentication
+from collections import defaultdict
 
 
-# from rest_framework.views import APIView
-# from rest_framework.response import Response
-# from rest_framework.authentication import get_authorization_header
-# from rest_framework import status
-# from rest_framework_simplejwt.tokens import AccessToken
-# from backendapis.models import Keystroke
-# from .serializers import KeystrokeSerializer
+class KeystrokeDataView(APIView):
+    permission_classes = [AllowAny]
 
-# from datetime import datetime
-# from django.utils import timezone
-# from rest_framework.response import Response
-# from rest_framework.views import APIView
-# from rest_framework.permissions import AllowAny
-# from datetime import timedelta
+    def initial(self, request, *args, **kwargs):
+        """
+        Validate the token and extract the organization_id.
+        """
+        auth_header = get_authorization_header(request).decode('utf-8')
+        if not auth_header:
+            return Response({"error": "Authorization token is required."}, status=status.HTTP_400_BAD_REQUEST)
 
-# from datetime import timedelta
+        try:
+            token = auth_header.split(" ")[1]
+            access_token = AccessToken(token)
+            self.organization_id = access_token.get('organization_id')
 
-# from django.db.models import Max, Min
+            if not self.organization_id:
+                return Response({"error": "Organization ID not found in token."}, status=status.HTTP_401_UNAUTHORIZED)
 
-# from datetime import timedelta
-# from rest_framework.response import Response
-# from rest_framework.views import APIView
-# from rest_framework.permissions import AllowAny
-# from django.utils import timezone
-# from datetime import datetime
+        except IndexError:
+            return Response({"error": "Invalid token format. Please provide a valid 'Bearer <token>'."}, status=status.HTTP_400_BAD_REQUEST)
+        except Exception as e:
+            return Response({"error": f"Token decoding error: {str(e)}"}, status=status.HTTP_401_UNAUTHORIZED)
 
-# from datetime import datetime, timedelta
-# from rest_framework.response import Response
-# from rest_framework.views import APIView
-# from rest_framework.permissions import AllowAny
-# from rest_framework import status
-# from django.utils import timezone
+        super().initial(request, *args, **kwargs)
 
-# class KeystrokeView(APIView):
-#     permission_classes = [AllowAny]
-
-#     def initial(self, request, *args, **kwargs):
-#         """
-#         Validate the token and extract the organization_id.
-#         """
-#         auth_header = get_authorization_header(request).decode('utf-8')
-#         if not auth_header:
-#             return Response({"error": "Authorization token is required."}, status=status.HTTP_400_BAD_REQUEST)
-
-#         try:
-#             token = auth_header.split(" ")[1]
-#             access_token = AccessToken(token)
-#             self.organization_id = access_token.get('organization_id')
-
-#             if not self.organization_id:
-#                 return Response({"error": "Organization ID not found in token."}, status=status.HTTP_401_UNAUTHORIZED)
-
-#         except IndexError:
-#             return Response({"error": "Invalid token format. Please provide a valid 'Bearer <token>'."}, status=status.HTTP_400_BAD_REQUEST)
-#         except Exception as e:
-#             return Response({"error": f"Token decoding error: {str(e)}"}, status=status.HTTP_401_UNAUTHORIZED)
-
-#         super().initial(request, *args, **kwargs)
-
-#     def get(self, request):
-#         """
-#         Handle the GET request to fetch aggregated keystroke data for the organization.
-#         """
-#         if not hasattr(self, 'organization_id'):
-#             return Response({"error": "Organization ID is missing."}, status=status.HTTP_400_BAD_REQUEST)
-
-#         # Get the date(s) from the query parameters or use today's date if not specified
-#         date_str = request.query_params.get('date', None)
-#         from_date_str = request.query_params.get('from_date', None)
-#         to_date_str = request.query_params.get('to_date', None)
-
-#         if date_str:
-#             # If a specific date is provided
-#             date_filter = datetime.strptime(date_str, '%Y-%m-%d').date()
-#         elif from_date_str and to_date_str:
-#             # If both from_date and to_date are provided, filter based on the range
-#             from_date = datetime.strptime(from_date_str, '%Y-%m-%d').date()
-#             to_date = datetime.strptime(to_date_str, '%Y-%m-%d').date()
-#             date_filter = (from_date, to_date)
-#         else:
-#             # Default to today's date if no date or range is provided
-#             date_filter = timezone.localdate()
-
-#         # Filter keystrokes based on the date(s) and organization
-#         if isinstance(date_filter, tuple):  # If it's a range (from_date, to_date)
-#             keystrokes = Keystroke.objects.filter(
-#                 e_id__o_id=self.organization_id,
-#                 activity_timestamp__date__range=date_filter
-#             )
-#         else:
-#             keystrokes = Keystroke.objects.filter(
-#                 e_id__o_id=self.organization_id,
-#                 activity_timestamp__date=date_filter
-#             )
-
-#         # Initialize aggregates
-#         total_keys_pressed = 0
-#         total_mouse_clicks = 0
-#         total_mouse_movements = 0
-#         total_idle_time = timedelta()
-#         total_productivity = 0
-#         count = 0
-#         employee_data = {}  # Dictionary to store session time data for each employee
-
-#         # Iterate through the filtered keystrokes and group by employee
-#         for keystroke in keystrokes:
-#             e_id = keystroke.e_id  # Get employee ID
-            
-#             # Initialize employee data if not already present
-#             if e_id not in employee_data:
-#                 employee_data[e_id] = {
-#                     'total_keys_pressed': 0,
-#                     'total_mouse_clicks': 0,
-#                     'total_mouse_movements': 0,
-#                     'total_idle_time': timedelta(),
-#                     'total_productivity': 0,
-#                     'count': 0,
-#                     'first_entry': None,
-#                     'last_entry': None,
-#                     'first_time_range': None,  # Track first time_range
-#                     'last_time_range': None,  # Track first time_range
-#                 }
-            
-#             # Access the employee's data dictionary
-#             employee = employee_data[e_id]
-            
-#             # Aggregate data for the employee
-#             employee['total_keys_pressed'] += keystroke.total_keys_pressed
-#             employee['total_mouse_clicks'] += keystroke.total_mouse_clicks
-#             employee['total_mouse_movements'] += keystroke.total_mouse_movements
-
-#             # Calculate idle time (1 minute if all fields are 0)
-#             if keystroke.total_keys_pressed == 0 and keystroke.total_mouse_clicks == 0 and keystroke.total_mouse_movements == 0:
-#                 employee['total_idle_time'] += timedelta(minutes=1)  # Add 1 minute of idle time
-#             else:
-#                 employee['total_idle_time'] += timedelta(minutes=0)  # Not idle
-
-#             # Update first and last entries for session time calculation
-#             if not employee['first_entry'] or keystroke.activity_timestamp < employee['first_entry']:
-#                 employee['first_entry'] = keystroke.activity_timestamp
-#                 if not employee['first_time_range']:  # Set the first time range
-#                     employee['first_time_range'] = keystroke.time_range  # Use the time range associated with the first entry
-            
-#             # Correct last entry to include time range of the latest activity
-#             if not employee['last_entry'] or keystroke.activity_timestamp > employee['last_entry']:
-#                 employee['last_entry'] = keystroke.activity_timestamp
-#                 employee['last_time_range'] = keystroke.time_range  # Use the latest time range
-            
-
-#             # Calculate productivity for this keystroke
-#             employee['total_productivity'] += calculate_productivity(
-#                 keystroke.total_keys_pressed, 
-#                 keystroke.total_mouse_clicks, 
-#                 keystroke.total_mouse_movements
-#             )
-#             employee['count'] += 1  # Count the number of entries to calculate average productivity
-
-#         # Prepare the aggregated response data for all employees
-#         employee_session_data = []
+   
+    def get_session_time(self, employee_keystrokes):
+        """
+        Calculate the total session time across multiple days.
+        """
+        # First, get the first and last entry timestamps across all keystrokes for the employee
+        first_entry = employee_keystrokes.aggregate(Min('activity_timestamp'))['activity_timestamp__min']
+        last_entry = employee_keystrokes.aggregate(Max('activity_timestamp'))['activity_timestamp__max']
         
-#         for e_id, data in employee_data.items():
-#             # Calculate average productivity (if count > 0 to avoid division by 0)
-#             avg_productivity = data['total_productivity'] / data['count'] if data['count'] > 0 else 0
+        # If no entries exist, return zero session time
+        if not first_entry or not last_entry:
+            return timedelta()
+    
+        # Initialize total session time
+        total_session_time = timedelta()
+    
+        # Iterate through each day's keystrokes and calculate session time for that day
+        current_day_start = first_entry.replace(hour=0, minute=0, second=0, microsecond=0)  # Start of the first day
+        current_day_end = current_day_start.replace(hour=23, minute=59, second=59, microsecond=999999)  # End of the first day
         
-#             # Calculate session time (time difference between first and last entry)
-#             session_time = timedelta()
-#             if data['first_entry'] and data['last_entry']:
-#                 session_time = data['last_entry'] - data['first_entry']
-        
-#             # Calculate work time (session time minus idle time)
-#             work_time = session_time - data['total_idle_time']
-#             print('work_time',work_time)
-        
-#             # Ensure work_time and session_time are not negative
-#             if work_time < timedelta():
-#                 work_time = timedelta()
-#             if session_time < timedelta():
-#                 session_time = timedelta()
-        
-#             # Format the times
-#             def format_time(time_delta):
-#                 """
-#                 Formats a datetime object into a string in the format 'HH:MM:SS'.
-#                 """
-#                 total_seconds = int(time_delta.total_seconds())
-#                 hours = total_seconds // 3600
-#                 minutes = (total_seconds % 3600) // 60
-#                 return f"{hours:02}:{minutes:02}"
+        while current_day_start <= last_entry:
+            # Get the keystrokes for the current day
+            daily_keystrokes = employee_keystrokes.filter(
+                activity_timestamp__gte=current_day_start,
+                activity_timestamp__lte=current_day_end
+            )
+            
+            if daily_keystrokes.exists():
+                first_entry_for_day = daily_keystrokes.aggregate(Min('activity_timestamp'))['activity_timestamp__min']
+                last_entry_for_day = daily_keystrokes.aggregate(Max('activity_timestamp'))['activity_timestamp__max']
                 
-        
-#             formatted_session_time = format_time(session_time)
-#             formatted_work_time = format_time(work_time)
-#             formatted_idle_time = format_time(data['total_idle_time'])
-            
-#             formatted_first_time_range = data['first_time_range'] if data['first_time_range'] else "No Time Range"
-#             formatted_last_time_range = data['last_time_range'] if data['last_time_range'] else "No Time Range"
-            
-#             employee_session_data.append({
-#                 "employee_id": e_id.id,  # Ensure e_id is serializable
-#                 "total_keys_pressed": data['total_keys_pressed'],
-#                 "total_mouse_clicks": data['total_mouse_clicks'],
-#                 "total_mouse_movements": data['total_mouse_movements'],
-#                 "avg_productivity": avg_productivity,
-#                 "total_idle_time": formatted_idle_time,  # Display idle time in HH:MM format
-#                 "work_time": formatted_work_time,  # Working time excluding idle
-#                 "session_time": formatted_session_time,  # Total session time including idle
-#                 "first_time": formatted_first_time_range,
-#                 "last_time": formatted_last_time_range,
-#                 "date": date_filter,
-#             })
+                # Calculate session time for the current day
+                if first_entry_for_day and last_entry_for_day:
+                    session_time_for_day = last_entry_for_day - first_entry_for_day
+                    total_session_time += session_time_for_day
+    
+            # Move to the next day
+            current_day_start += timedelta(days=1)
+            current_day_end += timedelta(days=1)
+    
+        return total_session_time
+    
+    def get(self, request):
+        """
+        Retrieve keystroke data based on date filters.
+        """
+        start_date_str = request.query_params.get('start_date')
+        end_date_str = request.query_params.get('end_date')
+        print("start_date:", start_date_str)
+        print("end_date:", end_date_str)
+    
+        try:
+            # Calculate date range
+            today = datetime.now().date()  # Get today's date
+            if start_date_str:
+                start_date = datetime.strptime(start_date_str, "%Y-%m-%d").date()
+            else:
+                start_date = today  # Default to today if no start_date is provided
+    
+            # If only start_date is provided, we assume the same for end_date
+            end_date = datetime.strptime(end_date_str, "%Y-%m-%d").date() if end_date_str else start_date
+    
+            # Start and end datetime range
+            tz = timezone('UTC')  # Use your specific timezone
+            start_datetime = make_aware(datetime.combine(start_date, datetime.min.time()))
+            end_datetime = make_aware(datetime.combine(end_date, datetime.max.time())) # End at 23:59:59.999999 of the end date
+    
+            print("Start DateTime:", start_datetime)
+            print("End DateTime:", end_datetime)
+            employees = Employee.objects.filter(o_id=self.organization_id)
+            employee_ids = employees.values_list('id', flat=True)  # Get a list of employee IDs
+    
+            # Query keystrokes for the given date range and organization ID
+            keystrokes = Keystroke.objects.filter(
+                 e_id__in=employee_ids,  # Filter by employee IDs
+                activity_timestamp__range=(start_datetime, end_datetime)
+            ).exclude(activity_timestamp__isnull=True)
+    
+            print("Keystroke Query:", keystrokes.query)
+            print("Keystroke Count:", keystrokes.count())
+    
+            # If no keystrokes found, return an empty response
+            if not keystrokes.exists():
+                return Response([], status=status.HTTP_200_OK)
+    
+            # Query employees belonging to the same organization
+            employees = Employee.objects.filter(o_id=self.organization_id)
+            print("Employees Count:", employees.count())
+    
+            response_data = []
+            for employee in employees:
+                # Filter keystrokes for the current employee
+                employee_keystrokes = keystrokes.filter(e_id=employee)
+                print(f"Employee {employee.e_name} Keystrokes Count:", employee_keystrokes.count())
+    
+                # If no keystrokes for this employee, skip to the next one
+                if not employee_keystrokes.exists():
+                    continue
+    
+                # Calculate session time across multiple days
+                session_time = self.get_session_time(employee_keystrokes)
+                print("Session Time for Employee:", session_time)
+    
+                # Calculate idle time (no keys pressed, no clicks, no movements)
+                idle_minutes = employee_keystrokes.filter(
+                    total_keys_pressed=0,
+                    total_mouse_clicks=0,
+                    total_mouse_movements=0
+                ).count()
+                idle_time = timedelta(minutes=idle_minutes)
+    
+                # Work time (session time minus idle time)
+                work_time = session_time - idle_time
+                if work_time < timedelta():
+                    work_time = timedelta()
+    
+                # Calculate productivity
+                productivity = self.calculate_productivity(employee_keystrokes)
+    
+                # Prepare the response data for this employee
+                response_data.append({
+                    "employee_name": employee.e_name,
+                    "session_time": self.format_time(session_time),
+                    "work_time": self.format_time(work_time),
+                    "idle_time": self.format_time(idle_time),
+                    "activity": productivity
+                })
+    
+            return Response(response_data, status=status.HTTP_200_OK)
+    
+        except Exception as e:
+            # Log and handle any errors during the processing
+            print("Error:", str(e))
+            return Response({"error": f"An error occurred: {str(e)}"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)        
+    def format_time(self, time_delta):
+        """
+        Formats a timedelta object into a string in the format 'HH:MM:SS'.
+        """
+        if isinstance(time_delta, timedelta):
+            total_seconds = int(time_delta.total_seconds())
+            hours = total_seconds // 3600
+            minutes = (total_seconds % 3600) // 60
+            seconds = total_seconds % 60
+            return f"{hours:02}:{minutes:02}:{seconds:02}"
+        else:
+            return "00:00:00"
+    
+    
+    def format_time(self, time_delta):
+        """
+        Formats a timedelta object into a string in the format 'HH:MM:SS'.
+        """
+        if isinstance(time_delta, timedelta):
+            total_seconds = int(time_delta.total_seconds())
+            hours = total_seconds // 3600
+            minutes = (total_seconds % 3600) // 60
+            seconds = total_seconds % 60
+            return f"{hours:02}:{minutes:02}:{seconds:02}"
+        else:
+            return "00:00:00"
+
+    def calculate_productivity(self, keystrokes):
+       print("Starting productivity calculation...")
+       
+       # Cache thresholds for departments
+       department_thresholds = {}
+       default_thresholds = {"key_threshold": 40, "mouse_threshold": 40, "scroll_threshold": 40}
+       print(f"Default thresholds: {default_thresholds}")
+       
+       # Query department-specific thresholds and store in a dictionary
+       for activity_productivity in ActivityProductivity.objects.select_related('department').all():
+           department_thresholds[activity_productivity.department] = {
+               "key_threshold": activity_productivity.no_of_key_press,
+               "mouse_threshold": activity_productivity.no_of_mouse_press,
+               "scroll_threshold": activity_productivity.no_of_mouse_scroll,
+           }
+   
+       # Initialize list to hold productivity values
+       productivity_values = []
+       print(f"Initialized productivity values: {productivity_values}")
+   
+       for keystroke in keystrokes:
+           print(f"Processing keystroke for employee: {keystroke.e_id}")
+           employee = keystroke.e_id  # Assuming keystrokes have e_id as a ForeignKey to Employee
+           departments = Departments.objects.filter(employees=employee)  # Many-to-Many relationship
+   
+           # Check if departments exist
+           if not departments.exists():
+               print(f"Employee {employee.e_name} has no department, skipping.")
+               continue  # Skip employees with no assigned departments
+           
+           # Use the first department's thresholds
+           department = departments.first()
+           thresholds = department_thresholds.get(department.id, default_thresholds)
+   
+           # Debugging: Print department thresholds
+           print(f"Employee {employee.e_name} - Department {department.department_name}: {thresholds}")
+   
+           # Get the keystroke values
+           total_keys = keystroke.total_keys_pressed
+           total_clicks = keystroke.total_mouse_clicks
+           total_movements = keystroke.total_mouse_movements
+   
+           # Debugging: Check keystroke values
+           print(f"Keystrokes - Keys: {total_keys}, Clicks: {total_clicks}, Movements: {total_movements}")
+   
+           productivity = 0
+           if (
+               total_keys >= thresholds["key_threshold"]
+               or total_clicks >= thresholds["mouse_threshold"]
+               or total_movements >= thresholds["scroll_threshold"]
+           ):
+               productivity = 100
+           else:
+               if thresholds["key_threshold"] > 0:
+                   productivity += (total_keys / thresholds["key_threshold"]) * 100
+               if thresholds["mouse_threshold"] > 0:
+                   productivity += (total_clicks / thresholds["mouse_threshold"]) * 100
+               if thresholds["scroll_threshold"] > 0:
+                   productivity += (total_movements / thresholds["scroll_threshold"]) * 100
+   
+               # Normalize productivity to a maximum of 100
+               productivity = min(productivity, 100)
+   
+           # Append productivity for this record
+           productivity_values.append(productivity)
+   
+       # Debugging: Print all calculated productivity values
+       print(f"Calculated productivity values: {productivity_values}")
+   
+       # Calculate average productivity
+       average_productivity = sum(productivity_values) / len(productivity_values) if productivity_values else 0
+       print(f"Average productivity: {average_productivity}")
+       
+       return average_productivity
 
 
-        
-#         return Response(employee_session_data)
 
+    
+  
 
 
 

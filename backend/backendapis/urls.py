@@ -3,6 +3,9 @@ from backendapis.views import Org_register,verify_otp,login_organization,resend_
 from .views import *
 
 urlpatterns = [
+
+    #Authentication section
+
     path('register/', Org_register),
     path('verify_otp/', verify_otp, name='verify_otp'),
     path('login/', login_organization, name='login'),
@@ -29,7 +32,7 @@ urlpatterns = [
 
     # Keystroke  section
     
-    # path('display_keystrokes/', KeystrokeView.as_view(), name='keystroke_list'),
+    path('display_keystrokes/', KeystrokeDataView.as_view(), name='keystroke_list'),
 
 
 
