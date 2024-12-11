@@ -36,7 +36,7 @@ urlpatterns = [
 
 
     #Monitoring section
-    # path('display_monitoring_data/', MonitoringEmployeeView.as_view(), name='display_monitoring_data'),
+    path('display_monitoring_data/', MonitoringEmployeeView.as_view(), name='display_monitoring_data'),
 
 
 

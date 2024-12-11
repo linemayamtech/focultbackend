@@ -1009,111 +1009,139 @@ class KeystrokeDataView(APIView):
 
 
 # Monitoring section 
+from django.db.models import DateField
+from django.db.models.functions import Cast
+from django.utils import timezone
+
+class MonitoringEmployeeView(APIView):
+    permission_classes = [AllowAny]
+
+    def initial(self, request, *args, **kwargs):
+        """
+        Extract and verify the token to get the organization_id.
+        """
+        auth_header = get_authorization_header(request).decode('utf-8')
+        if not auth_header:
+            return Response({"error": "Authorization token is required."}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            token = auth_header.split(" ")[1]
+            access_token = AccessToken(token)
+            self.organization_id = access_token.get('organization_id')
+            if not self.organization_id:
+                return Response({"error": "Organization ID not found in token."}, status=status.HTTP_401_UNAUTHORIZED)
+        except IndexError:
+            return Response({"error": "Invalid token format. Use 'Bearer <token>'."}, status=status.HTTP_400_BAD_REQUEST)
+        except Exception as e:
+            return Response({"error": f"Token decoding error: {str(e)}"}, status=status.HTTP_401_UNAUTHORIZED)
+
+        super().initial(request, *args, **kwargs)
+
+    def get(self, request, *args, **kwargs):
+        """
+        Display offline data for the logged-in organization, filtered by date or date range.
+        Compare the data with the AppProductivity model to categorize app usage as productive, unproductive, or neutral.
+        """
+        organization_id = self.organization_id
+        monitoring_data = Monitoring.objects.filter(e_id__o_id=organization_id)
+
+        # Get date filters
+        start_date = request.query_params.get('start_date')
+        print(start_date)
+        end_date = request.query_params.get('end_date')
+        print(end_date)
 
 
-# class MonitoringEmployeeView(APIView):
-#     permission_classes = [AllowAny]
+        try:
+            start_date = datetime.strptime(start_date.strip(), "%Y-%m-%d").date() if start_date else None
+            end_date = datetime.strptime(end_date.strip(), "%Y-%m-%d").date() if end_date else None
+        except ValueError:
+            return Response({"error": "Invalid date format. Use 'YYYY-MM-DD'."}, status=status.HTTP_400_BAD_REQUEST)
 
-#     def initial(self, request, *args, **kwargs):
-#         """
-#         Extract and verify the token to get the organization_id.
-#         """
-#         auth_header = get_authorization_header(request).decode('utf-8')
-#         if not auth_header:
-#             return Response({"error": "Authorization token is required."}, status=status.HTTP_400_BAD_REQUEST)
+        # Filter data
+        monitoring_data = monitoring_data.annotate(m_log_date=Cast('m_log_ts', DateField()))
+        print("monitoring_data",monitoring_data)
 
-#         try:
-#             token = auth_header.split(" ")[1]
-#             access_token = AccessToken(token)
-#             self.organization_id = access_token.get('organization_id')
-#             if not self.organization_id:
-#                 return Response({"error": "Organization ID not found in token."}, status=status.HTTP_401_UNAUTHORIZED)
-#         except IndexError:
-#             return Response({"error": "Invalid token format. Use 'Bearer <token>'."}, status=status.HTTP_400_BAD_REQUEST)
-#         except Exception as e:
-#             return Response({"error": f"Token decoding error: {str(e)}"}, status=status.HTTP_401_UNAUTHORIZED)
+        if start_date and end_date:
+            monitoring_data_queryset = monitoring_data.filter(
+                m_log_date__range=(start_date, end_date)
+            )
+            print("start_date and end_date")
+        elif start_date:
+            monitoring_data_queryset = monitoring_data.filter(
+                m_log_date__gte=start_date
+            )
+            print("start_date")
 
-#         super().initial(request, *args, **kwargs)
+        elif end_date:
+            monitoring_data_queryset = monitoring_data.filter(
+                m_log_date__lte=end_date
+            )
+            print("end_date")
 
-#     def get(self, request, *args, **kwargs):
-#         """
-#         Display offline data for the logged-in organization, filtered by date or date range.
-#         Compare the data with the AppProductivity model to categorize app usage as productive, unproductive, or neutral.
-#         """
-#         organization_id = self.organization_id
-#         monitoring_data = Monitoring.objects.filter(e_id__o_id=organization_id)
-
-#         # Get date filters
-#         start_date_str = request.query_params.get('start_date', None)
-#         end_date_str = request.query_params.get('end_date', None)
-
-#         try:
-#             start_date = datetime.strptime(start_date_str.strip(), "%Y-%m-%d").date() if start_date_str else None
-#             end_date = datetime.strptime(end_date_str.strip(), "%Y-%m-%d").date() if end_date_str else None
-#         except ValueError:
-#             return Response({"error": "Invalid date format. Use 'YYYY-MM-DD'."}, status=status.HTTP_400_BAD_REQUEST)
-
-#         # Filter data
-#         if start_date and end_date:
-#             monitoring_data_queryset = monitoring_data.filter(
-#                 starting_time__date__range=(start_date, end_date)
-#             )
-#         elif start_date:
-#             monitoring_data_queryset = monitoring_data.filter(
-#                 starting_time__date=start_date
-#             )
-#         elif end_date:
-#             monitoring_data_queryset = monitoring_data.filter(
-#                 starting_time__date=end_date
-#             )
-#         else:
-#             filter_date = timezone.now().date()
-#             monitoring_data_queryset = monitoring_data.filter(
-#                 starting_time__date=filter_date
-#             )
-
-#         # Initialize result dictionary
-#         employee_app_usage = {}
-
-#         for record in monitoring_data_queryset:
-#             employee_id = record.e_id.id
-#             app_name = record.m_title
-#             total_time_seconds = record.m_total_time_seconds
-
-#             # Check if employee data exists in result dictionary
-#             if employee_id not in employee_app_usage:
-#                 employee_app_usage[employee_id] = {
-#                     'employee_name': record.e_id.name,
-#                     'productive_time': 0,
-#                     'unproductive_time': 0,
-#                     'neutral_time': 0
-#                 }
-
-#             # Check app productivity state
-#             app_productivity = AppProductivity.objects.filter(app_name=app_name, department=record.e_id.department).first()
-#             if app_productivity:
-#                 app_state = app_productivity.app_state
-#             else:
-#                 app_state = AppProductivity.NEUTRAL
-
-#             # Categorize time spent on the app
-#             if app_state == AppProductivity.PRODUCTIVE:
-#                 employee_app_usage[employee_id]['productive_time'] += total_time_seconds
-#             elif app_state == AppProductivity.UNPRODUCTIVE:
-#                 employee_app_usage[employee_id]['unproductive_time'] += total_time_seconds
-#             elif app_state == AppProductivity.NEUTRAL:
-#                 employee_app_usage[employee_id]['neutral_time'] += total_time_seconds
-
-#         # Convert time from seconds to hours, minutes, seconds format for better readability
-#         for employee_id, usage_data in employee_app_usage.items():
-#             for key in ['productive_time', 'unproductive_time', 'neutral_time']:
-#                 total_seconds = usage_data[key]
-#                 hours, remainder = divmod(total_seconds, 3600)
-#                 minutes, seconds = divmod(remainder, 60)
-#                 usage_data[key] = f"{hours}:{minutes:02}:{seconds:02}"
-
-#         return Response(employee_app_usage)
+        else:
+            filter_date = timezone.now().date()
+            monitoring_data_queryset = monitoring_data.filter(
+                m_log_date=filter_date
+            )
+            print("today")
 
 
+        print("pppppppppppppppppppppppppppppppppp",monitoring_data_queryset)
+
+
+        # Serialize the filtered data
+        serializer = MonitoringSerializer(monitoring_data_queryset, many=True)
+
+        # Additional processing for productivity states
+        employee_app_usage = {}
+
+        for record in monitoring_data_queryset:
+            employee_id = record.e_id.id
+            app_name = record.m_title
+            print("loopil kerii")
+            print("employee_id",employee_id)
+            print("app_name",app_name)
+
+            # Ensure total_time_seconds is handled safely
+            total_time_seconds = int(record.m_total_time_seconds) if record.m_total_time_seconds is not None else 0
+            print("total_time_seconds",total_time_seconds)
+
+            # Check if employee data exists in result dictionary
+            if employee_id not in employee_app_usage:
+                employee_app_usage[employee_id] = {
+                    'employee_name': record.e_id.e_name,
+                    'productive_time': 0,
+                    'unproductive_time': 0,
+                    'neutral_time': 0
+                }
+
+            # Check app productivity state
+            app_productivity = AppProductivity.objects.filter(app_name=app_name, department=record.e_id.department).first()
+            if app_productivity:
+                app_state = app_productivity.app_state
+            else:
+                app_state = AppProductivity.NEUTRAL
+
+            # Categorize time spent on the app
+            if app_state == AppProductivity.PRODUCTIVE:
+                employee_app_usage[employee_id]['productive_time'] += total_time_seconds
+            elif app_state == AppProductivity.UNPRODUCTIVE:
+                employee_app_usage[employee_id]['unproductive_time'] += total_time_seconds
+            elif app_state == AppProductivity.NEUTRAL:
+                employee_app_usage[employee_id]['neutral_time'] += total_time_seconds
+
+        # Convert time from seconds to hours, minutes, seconds format for better readability
+        for employee_id, usage_data in employee_app_usage.items():
+            for key in ['productive_time', 'unproductive_time', 'neutral_time']:
+                total_seconds = usage_data[key]
+                hours, remainder = divmod(total_seconds, 3600)
+                minutes, seconds = divmod(remainder, 60)
+                usage_data[key] = f"{hours}:{minutes:02}:{seconds:02}"
+
+        return Response({
+            "monitoring_data": serializer.data,
+            "employee_app_usage": employee_app_usage
+        })
 
 

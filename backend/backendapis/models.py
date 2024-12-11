@@ -59,6 +59,7 @@ class Employee(models.Model):
         e_address = models.CharField(max_length=150)
         e_role = models.CharField(max_length=150, default='Employee')
         monitored = models.IntegerField(default=0) 
+        
         def __str__(self):
             return f'{self.id} {self.e_email} {self.e_password} {self.e_address} {self.e_contact} {self.e_gender} {self.e_role}'
     

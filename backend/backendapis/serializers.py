@@ -284,3 +284,7 @@ class KeystrokeSerializer(serializers.ModelSerializer):
         else:
             return "00:00:00"
 
+class MonitoringSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Monitoring
+        fields = '__all__'  # Include all fields, or specify the ones you need explicitly
