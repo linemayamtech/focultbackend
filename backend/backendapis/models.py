@@ -108,8 +108,7 @@ class AppProductivity(models.Model):
 
 
 class ActivityProductivity(models.Model):
-    department = models.ForeignKey(Departments, on_delete=models.CASCADE, null=True,unique=True)   
-    no_of_key_press = models.IntegerField(default=0)
+    department = models.OneToOneField(Departments, on_delete=models.CASCADE, null=True) # Use OneToOneField instead of ForeignKey with unique=True    no_of_key_press = models.IntegerField(default=0)
     no_of_mouse_press = models.IntegerField(default=0)
     no_of_mouse_scroll = models.IntegerField(default=0)
 

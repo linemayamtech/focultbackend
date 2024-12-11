@@ -125,11 +125,11 @@ from .models import AppProductivity, Organization
 
 
 class AppProductivitySerializers(serializers.ModelSerializer):
-    organization_name = serializers.ReadOnlyField(source='organization.o_name')
-
+    # Remove organization_name if not needed
     class Meta:
-        model = AppProductivity    
-        fields = ['id', 'organization', 'organization_name', 'app_name', 'app_state']
+        model = AppProductivity
+        fields = ['id','department' , 'app_name', 'app_state']  # Modify as needed
+
 
 
 from rest_framework import serializers

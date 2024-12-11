@@ -263,7 +263,7 @@ class AppProductivityAPIView(APIView):
             return Response({"error": "Organization not found."}, status=status.HTTP_404_NOT_FOUND)
         
         # Fetch productivity data for the organization
-        productivity_data = AppProductivity.objects.filter(organization=organization)
+        productivity_data = AppProductivity.objects.filter(department__o_id=organization)
         serializer = AppProductivitySerializers(productivity_data, many=True)
         
         return Response(serializer.data, status=status.HTTP_200_OK)
@@ -1012,6 +1012,7 @@ class KeystrokeDataView(APIView):
 from django.db.models import DateField
 from django.db.models.functions import Cast
 from django.utils import timezone
+from datetime import datetime, timedelta
 
 class MonitoringEmployeeView(APIView):
     permission_classes = [AllowAny]
@@ -1037,111 +1038,160 @@ class MonitoringEmployeeView(APIView):
 
         super().initial(request, *args, **kwargs)
 
+    from django.db.models import Q
+
     def get(self, request, *args, **kwargs):
         """
         Display offline data for the logged-in organization, filtered by date or date range.
         Compare the data with the AppProductivity model to categorize app usage as productive, unproductive, or neutral.
+        Calculate idle time and active hours for employees from the Keystroke model.
         """
         organization_id = self.organization_id
         monitoring_data = Monitoring.objects.filter(e_id__o_id=organization_id)
-
+        
         # Get date filters
         start_date = request.query_params.get('start_date')
-        print(start_date)
         end_date = request.query_params.get('end_date')
-        print(end_date)
-
-
+        
         try:
             start_date = datetime.strptime(start_date.strip(), "%Y-%m-%d").date() if start_date else None
             end_date = datetime.strptime(end_date.strip(), "%Y-%m-%d").date() if end_date else None
         except ValueError:
             return Response({"error": "Invalid date format. Use 'YYYY-MM-DD'."}, status=status.HTTP_400_BAD_REQUEST)
-
-        # Filter data
+        
+        # Filter monitoring data
         monitoring_data = monitoring_data.annotate(m_log_date=Cast('m_log_ts', DateField()))
-        print("monitoring_data",monitoring_data)
-
+        
         if start_date and end_date:
             monitoring_data_queryset = monitoring_data.filter(
                 m_log_date__range=(start_date, end_date)
             )
-            print("start_date and end_date")
         elif start_date:
             monitoring_data_queryset = monitoring_data.filter(
                 m_log_date__gte=start_date
             )
-            print("start_date")
-
         elif end_date:
             monitoring_data_queryset = monitoring_data.filter(
                 m_log_date__lte=end_date
             )
-            print("end_date")
-
         else:
             filter_date = timezone.now().date()
             monitoring_data_queryset = monitoring_data.filter(
                 m_log_date=filter_date
             )
-            print("today")
-
-
-        print("pppppppppppppppppppppppppppppppppp",monitoring_data_queryset)
-
-
+        
         # Serialize the filtered data
         serializer = MonitoringSerializer(monitoring_data_queryset, many=True)
-
+        
         # Additional processing for productivity states
-        employee_app_usage = {}
-
+        employee_app_usage = {}  # Dictionary to store employee aggregated data
+        
         for record in monitoring_data_queryset:
             employee_id = record.e_id.id
             app_name = record.m_title
-            print("loopil kerii")
-            print("employee_id",employee_id)
-            print("app_name",app_name)
-
-            # Ensure total_time_seconds is handled safely
-            total_time_seconds = int(record.m_total_time_seconds) if record.m_total_time_seconds is not None else 0
-            print("total_time_seconds",total_time_seconds)
-
-            # Check if employee data exists in result dictionary
+            
+            # Safely handle total_time_seconds
+            if record.m_total_time_seconds is not None:
+                try:
+                    time_parts = list(map(int, record.m_total_time_seconds.split(":")))
+                    total_time_seconds = timedelta(
+                        hours=time_parts[0], minutes=time_parts[1], seconds=time_parts[2]
+                    ).total_seconds()
+                except (ValueError, IndexError):
+                    total_time_seconds = 0
+            else:
+                total_time_seconds = 0
+            
+            # Initialize employee data
             if employee_id not in employee_app_usage:
                 employee_app_usage[employee_id] = {
                     'employee_name': record.e_id.e_name,
                     'productive_time': 0,
                     'unproductive_time': 0,
-                    'neutral_time': 0
+                    'neutral_time': 0,
+                    'idle_time': 0,  # Initialize idle time
+                    'active_hours': "0:00:00"  # Initialize active hours
                 }
-
+            
             # Check app productivity state
-            app_productivity = AppProductivity.objects.filter(app_name=app_name, department=record.e_id.department).first()
+            employee = Employee.objects.get(id=record.e_id.id, o_id=organization_id)
+            departments = Departments.objects.filter(employees=employee)
+            
+            app_productivity = AppProductivity.objects.filter(
+                app_name=app_name, department__in=departments
+            ).first()
+            
             if app_productivity:
                 app_state = app_productivity.app_state
             else:
                 app_state = AppProductivity.NEUTRAL
-
-            # Categorize time spent on the app
+            
+            # Aggregate time spent on the app
             if app_state == AppProductivity.PRODUCTIVE:
                 employee_app_usage[employee_id]['productive_time'] += total_time_seconds
             elif app_state == AppProductivity.UNPRODUCTIVE:
                 employee_app_usage[employee_id]['unproductive_time'] += total_time_seconds
             elif app_state == AppProductivity.NEUTRAL:
                 employee_app_usage[employee_id]['neutral_time'] += total_time_seconds
+        
+        # Calculate idle time and active hours for each employee
+        for employee_id in employee_app_usage.keys():
+            idle_time_seconds = 0
+            
+            # Fetch keystroke records for the employee
+            keystroke_records = Keystroke.objects.filter(
+                e_id__id=employee_id,
+                e_id__o_id=organization_id,
+                activity_timestamp__date__range=(start_date, end_date) if start_date and end_date else Q()
+            )
+            
+            # Iterate through keystroke records to calculate idle time
+            for record in keystroke_records:
+                if (
+                    record.total_keys_pressed == 0 or record.total_keys_pressed is None
+                ) and (
+                    record.total_mouse_clicks == 0 or record.total_mouse_clicks is None
+                ) and (
+                    record.total_mouse_movements == 0 or record.total_mouse_movements is None
+                ):
+                    idle_time_seconds += 60  # Assume 1 minute of idle time per record meeting the condition
+            
+            # Convert idle time from seconds to hours, minutes, seconds format
+            hours, remainder = divmod(idle_time_seconds, 3600)
+            minutes, seconds = divmod(remainder, 60)
+            idle_time = f"{hours}:{minutes:02}:{seconds:02}"
+            employee_app_usage[employee_id]['idle_time'] = idle_time
+            
+            # Calculate active hours
+            productive_seconds = employee_app_usage[employee_id]['productive_time']
+            print("productive hours", productive_seconds)
+            unproductive_seconds = employee_app_usage[employee_id]['unproductive_time']
+            print("unproductive_seconds",unproductive_seconds)
+            print("idle_seconds",idle_time_seconds)
+            neutral_seconds = employee_app_usage[employee_id]['neutral_time']  # Include neutral_time
 
-        # Convert time from seconds to hours, minutes, seconds format for better readability
+            active_seconds = productive_seconds + unproductive_seconds + neutral_seconds - idle_time_seconds
+            
+            print("active hours",active_seconds)
+            
+            if active_seconds < 0:
+                active_seconds = 0  # Ensure active time is not negative
+            
+            # Convert active time to hours, minutes, seconds format
+            hours, remainder = divmod(active_seconds, 3600)
+            minutes, seconds = divmod(remainder, 60)
+            employee_app_usage[employee_id]['active_hours'] = f"{hours}:{minutes:02}:{seconds:02}"
+        
+        # Convert time from seconds to hours, minutes, seconds format for other fields
         for employee_id, usage_data in employee_app_usage.items():
             for key in ['productive_time', 'unproductive_time', 'neutral_time']:
                 total_seconds = usage_data[key]
                 hours, remainder = divmod(total_seconds, 3600)
                 minutes, seconds = divmod(remainder, 60)
                 usage_data[key] = f"{hours}:{minutes:02}:{seconds:02}"
-
+        
+        # Return the aggregated employee data
         return Response({
-            "monitoring_data": serializer.data,
-            "employee_app_usage": employee_app_usage
-        })
-
-
+            "employee_app_usage": list(employee_app_usage.values())  # Return only the aggregated data for employees
+        })    
+    
