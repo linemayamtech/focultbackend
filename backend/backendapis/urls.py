@@ -35,6 +35,10 @@ urlpatterns = [
     path('display_keystrokes/', KeystrokeDataView.as_view(), name='keystroke_list'),
 
 
+    #Monitoring section
+    # path('display_monitoring_data/', MonitoringEmployeeView.as_view(), name='display_monitoring_data'),
+
+
 
 ]
 

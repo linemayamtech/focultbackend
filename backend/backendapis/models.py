@@ -47,28 +47,6 @@ class Organization(models.Model):
     class Meta:
         db_table = "organization"
 
-class AppProductivity(models.Model):
-    PRODUCTIVE = 'productive'
-    UNPRODUCTIVE = 'unproductive'
-    NEUTRAL = 'neutral'
-
-    APP_STATE_CHOICES = [
-        (PRODUCTIVE, 'Productive'),
-        (UNPRODUCTIVE, 'Un Productive'),  
-        (NEUTRAL, 'Neutral'),
-    ]
-
-    organization = models.ForeignKey(Organization, on_delete=models.CASCADE,null=True)
-    app_name = models.CharField(max_length=100)
-    app_state = models.CharField(
-        max_length=20,
-        choices=APP_STATE_CHOICES,
-        default=NEUTRAL,
-    )
-
-    def __str__(self):
-        return f"{self.app_name} ({self.get_app_state_display()})"
-    
 
 
 class Employee(models.Model):
@@ -101,8 +79,35 @@ class Departments(models.Model):
     def __str__(self):
         return f'{self.department_name} - {self.manager_id}'
 
+
+class AppProductivity(models.Model):
+    PRODUCTIVE = 'productive'
+    UNPRODUCTIVE = 'unproductive'
+    NEUTRAL = 'neutral'
+
+    APP_STATE_CHOICES = [
+        (PRODUCTIVE, 'Productive'),
+        (UNPRODUCTIVE, 'Un Productive'),  
+        (NEUTRAL, 'Neutral'),
+    ]
+
+    department=models.ForeignKey(Departments, on_delete=models.CASCADE,null=True)
+    app_name = models.CharField(max_length=100)
+    app_state = models.CharField(
+        max_length=20,
+        choices=APP_STATE_CHOICES,
+        default=NEUTRAL,
+    )
+
+    def __str__(self):
+        return f"{self.app_name} ({self.get_app_state_display()})"
+    
+
+
+
+
 class ActivityProductivity(models.Model):
-    department = models.ForeignKey(Departments, on_delete=models.CASCADE, null=True)   # ! need department id unique or not
+    department = models.ForeignKey(Departments, on_delete=models.CASCADE, null=True,unique=True)   
     no_of_key_press = models.IntegerField(default=0)
     no_of_mouse_press = models.IntegerField(default=0)
     no_of_mouse_scroll = models.IntegerField(default=0)
@@ -141,3 +146,17 @@ class Keystroke(models.Model):
     
     class Meta:
        db_table = "keystrokes" 
+
+
+class Monitoring(models.Model):
+    m_title = models.TextField(null=True)#pp nme
+    m_process= models.CharField(max_length=200, null=True)
+    m_url = models.TextField(blank=True, null=True)
+    m_log_ts = models.CharField(max_length=200)
+    m_total_time_seconds = models.CharField(max_length=200, null=True) # Allow null values
+    e_id = models.ForeignKey(Employee, on_delete=models.CASCADE)
+    # o_id = models.ForeignKey(Organization, on_delete=models.CASCADE)   #commented by abhi
+
+    class Meta:
+       db_table = "monitoring"
+

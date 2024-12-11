@@ -825,46 +825,60 @@ class KeystrokeDataView(APIView):
             # If only start_date is provided, we assume the same for end_date
             end_date = datetime.strptime(end_date_str, "%Y-%m-%d").date() if end_date_str else start_date
     
-            # Start and end datetime range
-            tz = timezone('UTC')  # Use your specific timezone
-            start_datetime = make_aware(datetime.combine(start_date, datetime.min.time()))
-            end_datetime = make_aware(datetime.combine(end_date, datetime.max.time())) # End at 23:59:59.999999 of the end date
-    
-            print("Start DateTime:", start_datetime)
-            print("End DateTime:", end_datetime)
+            # Query employees belonging to the same organization
             employees = Employee.objects.filter(o_id=self.organization_id)
             employee_ids = employees.values_list('id', flat=True)  # Get a list of employee IDs
     
-            # Query keystrokes for the given date range and organization ID
-            keystrokes = Keystroke.objects.filter(
-                 e_id__in=employee_ids,  # Filter by employee IDs
-                activity_timestamp__range=(start_datetime, end_datetime)
-            ).exclude(activity_timestamp__isnull=True)
+            # Initialize a list to store average productivity for each day
+            daily_avg_productivity = []
     
-            print("Keystroke Query:", keystrokes.query)
-            print("Keystroke Count:", keystrokes.count())
+            # Iterate over each day in the date range
+            current_date = start_date
+            while current_date <= end_date:
+                # Start and end datetime for the current day
+                start_datetime = make_aware(datetime.combine(current_date, datetime.min.time()))
+                end_datetime = make_aware(datetime.combine(current_date, datetime.max.time()))
     
-            # If no keystrokes found, return an empty response
-            if not keystrokes.exists():
-                return Response([], status=status.HTTP_200_OK)
+                # Query keystrokes for the current day and organization ID
+                keystrokes = Keystroke.objects.filter(
+                    e_id__in=employee_ids,  # Filter by employee IDs
+                    activity_timestamp__range=(start_datetime, end_datetime)
+                ).exclude(activity_timestamp__isnull=True)
     
-            # Query employees belonging to the same organization
-            employees = Employee.objects.filter(o_id=self.organization_id)
-            print("Employees Count:", employees.count())
+                # Calculate total productivity for the day
+                total_productivity = []
+                for employee in employees:
+                    # Filter keystrokes for the current employee on the current day
+                    employee_keystrokes = keystrokes.filter(e_id=employee)
+                    
+                    # If no keystrokes for this employee on this day, skip to next employee
+                    if not employee_keystrokes.exists():
+                        continue
     
+                    # Calculate productivity for the employee on this day
+                    productivity = self.calculate_productivity(employee_keystrokes)
+                    total_productivity.append(productivity)
+    
+                # Calculate the average productivity for the day
+                avg_productivity = sum(total_productivity) / len(total_productivity) if total_productivity else 0
+                daily_avg_productivity.append({
+                    "date": current_date.strftime("%Y-%m-%d"),
+                    "average_productivity": avg_productivity
+                })
+    
+                # Move to the next day
+                current_date += timedelta(days=1)
+    
+            # Prepare the response data for the given date range
             response_data = []
             for employee in employees:
-                # Filter keystrokes for the current employee
+                # Filter keystrokes for the current employee over the full date range
                 employee_keystrokes = keystrokes.filter(e_id=employee)
-                print(f"Employee {employee.e_name} Keystrokes Count:", employee_keystrokes.count())
-    
-                # If no keystrokes for this employee, skip to the next one
                 if not employee_keystrokes.exists():
                     continue
     
                 # Calculate session time across multiple days
                 session_time = self.get_session_time(employee_keystrokes)
-                print("Session Time for Employee:", session_time)
     
                 # Calculate idle time (no keys pressed, no clicks, no movements)
                 idle_minutes = employee_keystrokes.filter(
@@ -891,12 +905,18 @@ class KeystrokeDataView(APIView):
                     "activity": productivity
                 })
     
-            return Response(response_data, status=status.HTTP_200_OK)
+            # Prepare final response including employee-wise productivity and daily avg productivity
+            response = {
+                "employee_productivity": response_data,
+                "daily_avg_productivity": daily_avg_productivity
+            }
+    
+            return Response(response, status=status.HTTP_200_OK)
     
         except Exception as e:
             # Log and handle any errors during the processing
             print("Error:", str(e))
-            return Response({"error": f"An error occurred: {str(e)}"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)        
+            return Response({"error": f"An error occurred: {str(e)}"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)     
     def format_time(self, time_delta):
         """
         Formats a timedelta object into a string in the format 'HH:MM:SS'.
@@ -911,18 +931,6 @@ class KeystrokeDataView(APIView):
             return "00:00:00"
     
     
-    def format_time(self, time_delta):
-        """
-        Formats a timedelta object into a string in the format 'HH:MM:SS'.
-        """
-        if isinstance(time_delta, timedelta):
-            total_seconds = int(time_delta.total_seconds())
-            hours = total_seconds // 3600
-            minutes = (total_seconds % 3600) // 60
-            seconds = total_seconds % 60
-            return f"{hours:02}:{minutes:02}:{seconds:02}"
-        else:
-            return "00:00:00"
 
     def calculate_productivity(self, keystrokes):
        print("Starting productivity calculation...")
@@ -1000,10 +1008,111 @@ class KeystrokeDataView(APIView):
        return average_productivity
 
 
+# Monitoring section 
 
-    
-  
 
+# class MonitoringEmployeeView(APIView):
+#     permission_classes = [AllowAny]
+
+#     def initial(self, request, *args, **kwargs):
+#         """
+#         Extract and verify the token to get the organization_id.
+#         """
+#         auth_header = get_authorization_header(request).decode('utf-8')
+#         if not auth_header:
+#             return Response({"error": "Authorization token is required."}, status=status.HTTP_400_BAD_REQUEST)
+
+#         try:
+#             token = auth_header.split(" ")[1]
+#             access_token = AccessToken(token)
+#             self.organization_id = access_token.get('organization_id')
+#             if not self.organization_id:
+#                 return Response({"error": "Organization ID not found in token."}, status=status.HTTP_401_UNAUTHORIZED)
+#         except IndexError:
+#             return Response({"error": "Invalid token format. Use 'Bearer <token>'."}, status=status.HTTP_400_BAD_REQUEST)
+#         except Exception as e:
+#             return Response({"error": f"Token decoding error: {str(e)}"}, status=status.HTTP_401_UNAUTHORIZED)
+
+#         super().initial(request, *args, **kwargs)
+
+#     def get(self, request, *args, **kwargs):
+#         """
+#         Display offline data for the logged-in organization, filtered by date or date range.
+#         Compare the data with the AppProductivity model to categorize app usage as productive, unproductive, or neutral.
+#         """
+#         organization_id = self.organization_id
+#         monitoring_data = Monitoring.objects.filter(e_id__o_id=organization_id)
+
+#         # Get date filters
+#         start_date_str = request.query_params.get('start_date', None)
+#         end_date_str = request.query_params.get('end_date', None)
+
+#         try:
+#             start_date = datetime.strptime(start_date_str.strip(), "%Y-%m-%d").date() if start_date_str else None
+#             end_date = datetime.strptime(end_date_str.strip(), "%Y-%m-%d").date() if end_date_str else None
+#         except ValueError:
+#             return Response({"error": "Invalid date format. Use 'YYYY-MM-DD'."}, status=status.HTTP_400_BAD_REQUEST)
+
+#         # Filter data
+#         if start_date and end_date:
+#             monitoring_data_queryset = monitoring_data.filter(
+#                 starting_time__date__range=(start_date, end_date)
+#             )
+#         elif start_date:
+#             monitoring_data_queryset = monitoring_data.filter(
+#                 starting_time__date=start_date
+#             )
+#         elif end_date:
+#             monitoring_data_queryset = monitoring_data.filter(
+#                 starting_time__date=end_date
+#             )
+#         else:
+#             filter_date = timezone.now().date()
+#             monitoring_data_queryset = monitoring_data.filter(
+#                 starting_time__date=filter_date
+#             )
+
+#         # Initialize result dictionary
+#         employee_app_usage = {}
+
+#         for record in monitoring_data_queryset:
+#             employee_id = record.e_id.id
+#             app_name = record.m_title
+#             total_time_seconds = record.m_total_time_seconds
+
+#             # Check if employee data exists in result dictionary
+#             if employee_id not in employee_app_usage:
+#                 employee_app_usage[employee_id] = {
+#                     'employee_name': record.e_id.name,
+#                     'productive_time': 0,
+#                     'unproductive_time': 0,
+#                     'neutral_time': 0
+#                 }
+
+#             # Check app productivity state
+#             app_productivity = AppProductivity.objects.filter(app_name=app_name, department=record.e_id.department).first()
+#             if app_productivity:
+#                 app_state = app_productivity.app_state
+#             else:
+#                 app_state = AppProductivity.NEUTRAL
+
+#             # Categorize time spent on the app
+#             if app_state == AppProductivity.PRODUCTIVE:
+#                 employee_app_usage[employee_id]['productive_time'] += total_time_seconds
+#             elif app_state == AppProductivity.UNPRODUCTIVE:
+#                 employee_app_usage[employee_id]['unproductive_time'] += total_time_seconds
+#             elif app_state == AppProductivity.NEUTRAL:
+#                 employee_app_usage[employee_id]['neutral_time'] += total_time_seconds
+
+#         # Convert time from seconds to hours, minutes, seconds format for better readability
+#         for employee_id, usage_data in employee_app_usage.items():
+#             for key in ['productive_time', 'unproductive_time', 'neutral_time']:
+#                 total_seconds = usage_data[key]
+#                 hours, remainder = divmod(total_seconds, 3600)
+#                 minutes, seconds = divmod(remainder, 60)
+#                 usage_data[key] = f"{hours}:{minutes:02}:{seconds:02}"
+
+#         return Response(employee_app_usage)
 
 
 
