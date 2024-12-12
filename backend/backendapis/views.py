@@ -38,7 +38,8 @@ from datetime import datetime, timedelta
 from django.db.models import Min, Max
 from django.utils.timezone import make_aware
 from pytz import timezone
-
+import threading
+from django.core.mail import send_mail
 
 
 
@@ -221,7 +222,10 @@ def login_organization(request):
 
 #AppProductivity Section
 
-
+class Pagination_AppProductivity(PageNumberPagination):
+    page_size = 10  # Default page size
+    page_size_query_param = 'page_size'  # Allows client to specify page size
+    max_page_size = 100  # Maximum page size limit
 
 class AppProductivityAPIView(APIView):
     permission_classes = [AllowAny]
@@ -263,27 +267,40 @@ class AppProductivityAPIView(APIView):
             return Response({"error": "Organization not found."}, status=status.HTTP_404_NOT_FOUND)
         
         # Fetch productivity data for the organization
-        productivity_data = AppProductivity.objects.filter(department__o_id=organization)
-        serializer = AppProductivitySerializers(productivity_data, many=True)
+        app_productivity_data = AppProductivity.objects.filter(department__o_id=organization)
+
         
-        return Response(serializer.data, status=status.HTTP_200_OK)
+        paginator = Pagination_AppProductivity()
+        result_page = paginator.paginate_queryset(app_productivity_data, request)
+        serializer = AppProductivitySerializers(result_page, many=True)
+        return paginator.get_paginated_response(serializer.data)
+     
     
     def post(self, request, *args, **kwargs):
         """
-        Add productivity data for the authenticated organization.
+        Add productivity data for the authenticated organization via department.
         """
         try:
-            organization = Organization.objects.get(id=self.organization_id)
+            # Get the department object from the request data
+            department_id = request.data.get('department')
+            department = Departments.objects.get(id=department_id)
+    
+            # Retrieve the organization from the department
+            organization = department.o_id
+        except Departments.DoesNotExist:
+            return Response({"error": "Department not found."}, status=status.HTTP_404_NOT_FOUND)
         except Organization.DoesNotExist:
             return Response({"error": "Organization not found."}, status=status.HTTP_404_NOT_FOUND)
-        
+    
+        # Pass the department, not the organization, to the serializer
         serializer = AppProductivitySerializers(data=request.data)
         
         if serializer.is_valid():
-            serializer.save(organization=organization)
+            serializer.save(department=department)  # Save with the correct field
             return Response(serializer.data, status=status.HTTP_201_CREATED)
         
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
     
     def patch(self, request, *args, **kwargs):
         """
@@ -295,7 +312,7 @@ class AppProductivityAPIView(APIView):
             data = AppProductivity.objects.get(id=data_id)
             
             # Ensure the data belongs to the authenticated organization
-            if data.organization.id != self.organization_id:
+            if data.department.o_id.id != self.organization_id:
                 return Response({"error": "You are not authorized to edit this data."}, status=status.HTTP_403_FORBIDDEN)
             
             # Update fields
@@ -320,7 +337,7 @@ class AppProductivityAPIView(APIView):
             data = AppProductivity.objects.get(id=data_id)
             
             # Ensure the data belongs to the authenticated organization
-            if data.organization.id != self.organization_id:
+            if data.department.o_id.id != self.organization_id:
                 return Response({"error": "You are not authorized to delete this data."}, status=status.HTTP_403_FORBIDDEN)
             
             data.delete()
@@ -592,18 +609,24 @@ class ManageOfflineDataAPIView(APIView):
         """
         organization_id = self.organization_id
         offline_data_id = kwargs.get('id')
-
+    
         try:
             offline_data = OfflineData.objects.get(id=offline_data_id, employee__o_id=organization_id)
         except OfflineData.DoesNotExist:
             return Response({"error": "Offline data not found or not associated with the organization."}, status=status.HTTP_404_NOT_FOUND)
-
+    
+        # Check if 'ending_approved_by' is null and set it to the same value as 'starting_approved_by'
+        if not request.data.get('ending_approved_by') and offline_data.starting_approved_by:
+            request.data['ending_approved_by'] = offline_data.starting_approved_by
+    
+        # Proceed with the serializer to validate and save the data
         serializer = OfflineDataSerializers(offline_data, data=request.data, partial=True)
         if serializer.is_valid():
             serializer.save()
             return Response(serializer.data, status=status.HTTP_200_OK)
-
+    
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+    
 
     def delete(self, request, *args, **kwargs):
         """
@@ -623,9 +646,18 @@ class ManageOfflineDataAPIView(APIView):
 
 #Notice section
 
+def send_email_thread(employee, subject, personalized_message, from_email):
+        send_mail(
+            subject,
+            personalized_message,
+            from_email,  # Display sender as: Organization Name <otp@focult.com>
+            [employee.e_email],
+            fail_silently=False,
+        )
+    
 
 class NoticePagination(PageNumberPagination):
-    page_size = 10  # Number of notices per page
+    page_size = 10   # Number of notices per page
     page_size_query_param = 'page_size'  # Optional: Allow the client to specify the page size
     max_page_size = 100  # Max limit on page size
 
@@ -663,19 +695,20 @@ class NoticeAPIView(APIView):
         # Continue with the parent class's initial() method
         super().initial(request, *args, **kwargs)
 
+    
+
     def post(self, request, *args, **kwargs):
-        """ Create a new notice """
-        # Ensure the organization ID from the token is used
+        """Create a new notice"""
         organization_id_from_token = self.organization_id
     
         if not organization_id_from_token:
-            return Response({"error": "Organization ID not found in token."}, status=HTTP_400_BAD_REQUEST)
+            return Response({"error": "Organization ID not found in token."}, status=status.HTTP_400_BAD_REQUEST)
     
         # Check if the organization exists
         try:
             organization = Organization.objects.get(id=organization_id_from_token)
         except Organization.DoesNotExist:
-            return Response({"error": "Organization not found."}, status=HTTP_404_NOT_FOUND)
+            return Response({"error": "Organization not found."}, status=status.HTTP_404_NOT_FOUND)
     
         # Add the organization instance to the request data
         data = request.data.copy()
@@ -685,12 +718,39 @@ class NoticeAPIView(APIView):
         serializer = NoticeSerializer(data=data)
         if serializer.is_valid():
             # Save the notice and associate it with the organization
-            serializer.save(organization=organization)
-            return Response(serializer.data, status=HTTP_201_CREATED)
+            notice = serializer.save(organization=organization)
     
-        return Response(serializer.errors, status=HTTP_400_BAD_REQUEST)
-
-
+            # Get all employees in the organization
+            employees = Employee.objects.filter(o_id=organization)
+    
+            # Prepare the email content
+            subject = notice.title
+            message_template = notice.description  # The original message template
+            
+            # Fixed sender email address
+            sender_email = 'otp@focult.com'
+            # Set the sender's display name as the organization name
+            from_email = f"{organization.o_name} <{sender_email}>"
+    
+            # Send email to all employees in parallel using threads
+            threads = []
+            for employee in employees:
+                # Create a personalized message by inserting the employee's name
+                personalized_message = f"Dear {employee.e_name},\n\n {subject} \n\n  {message_template}"
+    
+                # Create and start a new thread for each email to be sent in parallel
+                thread = threading.Thread(target=send_email_thread, args=(employee, subject, personalized_message, from_email))
+                threads.append(thread)
+                thread.start()
+    
+            # Wait for all threads to finish
+            for thread in threads:
+                thread.join()
+    
+            return Response(serializer.data, status=status.HTTP_201_CREATED)
+    
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+    
 
     def get(self, request, *args, **kwargs):
         """ Get a paginated list of all notices for the organization """

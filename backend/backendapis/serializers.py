@@ -87,6 +87,13 @@ class OrganizationLoginSerializer(serializers.Serializer):
 from rest_framework import serializers
 from .models import AppProductivity, Organization
 
+class EmployeeSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Employee
+        fields = ['o_id', 'e_name', 'e_email', 'e_password', 'e_gender', 'e_contact', 'e_address', 'e_role', 'monitored']
+
+
+
 # class ProductivitySerializers(serializers.ModelSerializer):
 #     # Adding an extra field to the serializer
 #     productivity_info = serializers.SerializerMethodField()
@@ -133,6 +140,7 @@ class AppProductivitySerializers(serializers.ModelSerializer):
 
 
 from rest_framework import serializers
+from django.utils.timezone import now
 
 class ActivityProductivitySerializers(serializers.ModelSerializer):
     organization_name = serializers.SerializerMethodField()  # Custom field for organization name
@@ -174,6 +182,11 @@ class OfflineDataSerializers(serializers.ModelSerializer):
         if not self.instance and value is not None:
             raise serializers.ValidationError("end_time cannot be set during creation.")
         return value
+    
+    def update(self, instance, validated_data):
+        # Set end_time to the current time
+        validated_data['end_time'] = now()
+        return super().update(instance, validated_data)
 
 
 
