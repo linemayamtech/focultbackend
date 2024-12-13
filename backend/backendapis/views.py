@@ -40,8 +40,22 @@ from django.utils.timezone import make_aware
 from pytz import timezone
 import threading
 from django.core.mail import send_mail
-
-
+from django.db.models import DateField
+from django.db.models.functions import Cast
+from django.utils import timezone
+from datetime import datetime, timedelta
+import logging
+from collections import defaultdict
+from django.db.models import Sum, F, Value
+from django.db.models.functions import Cast, Coalesce
+from datetime import datetime
+import pytz
+from django.db.models import Sum, F
+from rest_framework.response import Response
+from rest_framework.pagination import PageNumberPagination
+from rest_framework import status
+from datetime import datetime, timedelta
+from rest_framework.exceptions import AuthenticationFailed
 
 
 
@@ -292,6 +306,11 @@ class AppProductivityAPIView(APIView):
         except Organization.DoesNotExist:
             return Response({"error": "Organization not found."}, status=status.HTTP_404_NOT_FOUND)
     
+        # Check for duplicate app name in the same department
+        app_name = request.data.get('app_name')
+        if AppProductivity.objects.filter(department=department, app_name=app_name).exists():
+            return Response({"error": "App name already exists in this department."}, status=status.HTTP_400_BAD_REQUEST)
+    
         # Pass the department, not the organization, to the serializer
         serializer = AppProductivitySerializers(data=request.data)
         
@@ -300,6 +319,7 @@ class AppProductivityAPIView(APIView):
             return Response(serializer.data, status=status.HTTP_201_CREATED)
         
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+    
 
     
     def patch(self, request, *args, **kwargs):
@@ -310,13 +330,21 @@ class AppProductivityAPIView(APIView):
         
         try:
             data = AppProductivity.objects.get(id=data_id)
-            
+    
             # Ensure the data belongs to the authenticated organization
             if data.department.o_id.id != self.organization_id:
                 return Response({"error": "You are not authorized to edit this data."}, status=status.HTTP_403_FORBIDDEN)
-            
+    
+            # Check for duplicate app name in the same department, excluding the current record
+            new_app_name = request.data.get('app_name', data.app_name)
+            if (
+                new_app_name != data.app_name and 
+                AppProductivity.objects.filter(department=data.department, app_name=new_app_name).exclude(id=data_id).exists()
+            ):
+                return Response({"error": "App name already exists in this department."}, status=status.HTTP_400_BAD_REQUEST)
+    
             # Update fields
-            data.app_name = request.data.get('app_name', data.app_name)
+            data.app_name = new_app_name
             data.app_state = request.data.get('app_state', data.app_state)
             data.save()
             
@@ -326,6 +354,7 @@ class AppProductivityAPIView(APIView):
             return Response({"error": "Data not found."}, status=status.HTTP_404_NOT_FOUND)
         except Exception as e:
             return Response({"error": f"An error occurred: {str(e)}"}, status=status.HTTP_400_BAD_REQUEST)
+    
     
     def delete(self, request, *args, **kwargs):
         """
@@ -438,9 +467,9 @@ class ActivityProductivityAPIView(APIView):
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
 
-    def put(self, request, *args, **kwargs):
+    def patch(self, request, *args, **kwargs):
         """
-        Edit an existing activity productivity record.
+        Partially update an existing activity productivity record.
         """
         productivity_id = kwargs.get('pk')
         if not productivity_id:
@@ -451,12 +480,14 @@ class ActivityProductivityAPIView(APIView):
         except ActivityProductivity.DoesNotExist:
             return Response({"error": "Productivity record not found or not associated with the organization."}, status=status.HTTP_404_NOT_FOUND)
         
+        # Partial update with partial=True
         serializer = ActivityProductivitySerializers(productivity, data=request.data, partial=True)
         if serializer.is_valid():
             serializer.save()
             return Response(serializer.data, status=status.HTTP_200_OK)
         
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+    
 
     def delete(self, request, *args, **kwargs):
         """
@@ -603,29 +634,30 @@ class ManageOfflineDataAPIView(APIView):
 
         super().initial(request, *args, **kwargs)
 
-    def put(self, request, *args, **kwargs):
+    def patch(self, request, *args, **kwargs):
         """
-        Update an existing offline data record.
+        Partially update an existing offline data record.
         """
         organization_id = self.organization_id
         offline_data_id = kwargs.get('id')
-    
+        
         try:
             offline_data = OfflineData.objects.get(id=offline_data_id, employee__o_id=organization_id)
         except OfflineData.DoesNotExist:
             return Response({"error": "Offline data not found or not associated with the organization."}, status=status.HTTP_404_NOT_FOUND)
-    
+        
         # Check if 'ending_approved_by' is null and set it to the same value as 'starting_approved_by'
         if not request.data.get('ending_approved_by') and offline_data.starting_approved_by:
             request.data['ending_approved_by'] = offline_data.starting_approved_by
-    
+        
         # Proceed with the serializer to validate and save the data
         serializer = OfflineDataSerializers(offline_data, data=request.data, partial=True)
         if serializer.is_valid():
             serializer.save()
             return Response(serializer.data, status=status.HTTP_200_OK)
-    
+        
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+    
     
 
     def delete(self, request, *args, **kwargs):
@@ -768,13 +800,14 @@ class NoticeAPIView(APIView):
         return paginator.get_paginated_response(serializer.data)
 
 
-    def put(self, request, *args, **kwargs):
-        """ Update an existing notice """
+    def patch(self, request, *args, **kwargs):
+        """ Partially update an existing notice """
         try:
             notice = Notice.objects.get(id=kwargs['id'], organization_id=self.organization_id)
         except Notice.DoesNotExist:
             return Response({'error': 'Notice not found'}, status=HTTP_404_NOT_FOUND)
-
+    
+        # Use partial=True to allow partial updates
         serializer = NoticeSerializer(notice, data=request.data, partial=True)
         if serializer.is_valid():
             serializer.save()
@@ -794,8 +827,11 @@ class NoticeAPIView(APIView):
 
 
 # Keystroke  section
-from collections import defaultdict
 
+class KeystrokePagination(PageNumberPagination):
+    page_size = 10   # Number of notices per page
+    page_size_query_param = 'page_size'  # Optional: Allow the client to specify the page size
+    max_page_size = 100  # Max limit on page size
 
 class KeystrokeDataView(APIView):
     permission_classes = [AllowAny]
@@ -871,112 +907,103 @@ class KeystrokeDataView(APIView):
         """
         start_date_str = request.query_params.get('start_date')
         end_date_str = request.query_params.get('end_date')
-        print("start_date:", start_date_str)
-        print("end_date:", end_date_str)
-    
+        
         try:
-            # Calculate date range
-            today = datetime.now().date()  # Get today's date
-            if start_date_str:
-                start_date = datetime.strptime(start_date_str, "%Y-%m-%d").date()
-            else:
-                start_date = today  # Default to today if no start_date is provided
-    
-            # If only start_date is provided, we assume the same for end_date
+            # Determine the date range
+            today = datetime.now().date()
+            start_date = datetime.strptime(start_date_str, "%Y-%m-%d").date() if start_date_str else today
             end_date = datetime.strptime(end_date_str, "%Y-%m-%d").date() if end_date_str else start_date
-    
-            # Query employees belonging to the same organization
+            
+            # Ensure end_date is not before start_date
+            if end_date < start_date:
+                return Response({"error": "End date cannot be before start date."}, status=status.HTTP_400_BAD_REQUEST)
+            
+            # Fetch employees in the organization
             employees = Employee.objects.filter(o_id=self.organization_id)
-            employee_ids = employees.values_list('id', flat=True)  # Get a list of employee IDs
-    
-            # Initialize a list to store average productivity for each day
+            employee_ids = employees.values_list('id', flat=True)
+            
+            # Containers for results
             daily_avg_productivity = []
+            response_data = []
     
-            # Iterate over each day in the date range
+            # Iterate over each day in the range
             current_date = start_date
             while current_date <= end_date:
-                # Start and end datetime for the current day
-                start_datetime = make_aware(datetime.combine(current_date, datetime.min.time()))
-                end_datetime = make_aware(datetime.combine(current_date, datetime.max.time()))
+                # Daily time range
+                start_datetime = make_aware(datetime.combine(current_date, datetime.min.time()), timezone=pytz.UTC)
+                end_datetime = make_aware(datetime.combine(current_date, datetime.max.time()), timezone=pytz.UTC)
     
-                # Query keystrokes for the current day and organization ID
+                # Query keystrokes for the day
                 keystrokes = Keystroke.objects.filter(
-                    e_id__in=employee_ids,  # Filter by employee IDs
+                    e_id__in=employee_ids,
                     activity_timestamp__range=(start_datetime, end_datetime)
                 ).exclude(activity_timestamp__isnull=True)
     
-                # Calculate total productivity for the day
-                total_productivity = []
-                for employee in employees:
-                    # Filter keystrokes for the current employee on the current day
-                    employee_keystrokes = keystrokes.filter(e_id=employee)
-                    
-                    # If no keystrokes for this employee on this day, skip to next employee
-                    if not employee_keystrokes.exists():
-                        continue
+                # Calculate daily average productivity
+                daily_productivity = [
+                    self.calculate_productivity(keystrokes.filter(e_id=employee))
+                    for employee in employees if keystrokes.filter(e_id=employee).exists()
+                ]
+                avg_productivity = sum(daily_productivity) / len(daily_productivity) if daily_productivity else 0
     
-                    # Calculate productivity for the employee on this day
-                    productivity = self.calculate_productivity(employee_keystrokes)
-                    total_productivity.append(productivity)
-    
-                # Calculate the average productivity for the day
-                avg_productivity = sum(total_productivity) / len(total_productivity) if total_productivity else 0
                 daily_avg_productivity.append({
                     "date": current_date.strftime("%Y-%m-%d"),
-                    "average_productivity": avg_productivity
+                    "average_productivity": round(avg_productivity, 2)
                 })
+    
+                # Add employee-wise productivity
+                for employee in employees:
+                    employee_keystrokes = keystrokes.filter(e_id=employee)
+                    if not employee_keystrokes.exists():
+                        response_data.append({
+                            "employee_name": employee.e_name,
+                            "date": current_date.strftime("%Y-%m-%d"),
+                            "session_time": "00:00:00",
+                            "work_time": "00:00:00",
+                            "idle_time": "00:00:00",
+                            "activity": 0
+                        })
+                        continue
+    
+                    # Calculate session and productivity details
+                    session_time = self.get_session_time(employee_keystrokes)
+                    idle_minutes = employee_keystrokes.filter(
+                        total_keys_pressed=0, total_mouse_clicks=0, total_mouse_movements=0
+                    ).count()
+                    idle_time = timedelta(minutes=idle_minutes)
+                    work_time = max(session_time - idle_time, timedelta(0))
+    
+                    productivity = self.calculate_productivity(employee_keystrokes)
+    
+                    response_data.append({
+                        "employee_name": employee.e_name,
+                        "date": current_date.strftime("%Y-%m-%d"),
+                        "session_time": self.format_time(session_time),
+                        "work_time": self.format_time(work_time),
+                        "idle_time": self.format_time(idle_time),
+                        "activity": round(productivity, 2)
+                    })
     
                 # Move to the next day
                 current_date += timedelta(days=1)
-    
-            # Prepare the response data for the given date range
-            response_data = []
-            for employee in employees:
-                # Filter keystrokes for the current employee over the full date range
-                employee_keystrokes = keystrokes.filter(e_id=employee)
-                if not employee_keystrokes.exists():
-                    continue
-    
-                # Calculate session time across multiple days
-                session_time = self.get_session_time(employee_keystrokes)
-    
-                # Calculate idle time (no keys pressed, no clicks, no movements)
-                idle_minutes = employee_keystrokes.filter(
-                    total_keys_pressed=0,
-                    total_mouse_clicks=0,
-                    total_mouse_movements=0
-                ).count()
-                idle_time = timedelta(minutes=idle_minutes)
-    
-                # Work time (session time minus idle time)
-                work_time = session_time - idle_time
-                if work_time < timedelta():
-                    work_time = timedelta()
-    
-                # Calculate productivity
-                productivity = self.calculate_productivity(employee_keystrokes)
-    
-                # Prepare the response data for this employee
-                response_data.append({
-                    "employee_name": employee.e_name,
-                    "session_time": self.format_time(session_time),
-                    "work_time": self.format_time(work_time),
-                    "idle_time": self.format_time(idle_time),
-                    "activity": productivity
-                })
-    
-            # Prepare final response including employee-wise productivity and daily avg productivity
-            response = {
-                "employee_productivity": response_data,
-                "daily_avg_productivity": daily_avg_productivity
-            }
-    
-            return Response(response, status=status.HTTP_200_OK)
+                # Paginate employee_productivity
+                productivity_paginator = KeystrokePagination()
+                paginated_productivity = productivity_paginator.paginate_queryset(response_data, request)
+                # Paginate graph_daily_avg_productivity
+                avg_productivity_paginator = KeystrokePagination()
+                paginated_avg_productivity = avg_productivity_paginator.paginate_queryset(daily_avg_productivity, request)
+
+            # Final response
+            return Response({
+                "employee_productivity": productivity_paginator.get_paginated_response(paginated_productivity).data,
+                "graph_daily_avg_productivity": avg_productivity_paginator.get_paginated_response(paginated_avg_productivity).data
+            })
     
         except Exception as e:
-            # Log and handle any errors during the processing
-            print("Error:", str(e))
-            return Response({"error": f"An error occurred: {str(e)}"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)     
+            # Log error for debugging
+            logging.error(f"Error in get method: {str(e)}", exc_info=True)
+            return Response({"error": "An unexpected error occurred. Please try again later."}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+       
     def format_time(self, time_delta):
         """
         Formats a timedelta object into a string in the format 'HH:MM:SS'.
@@ -1069,10 +1096,12 @@ class KeystrokeDataView(APIView):
 
 
 # Monitoring section 
-from django.db.models import DateField
-from django.db.models.functions import Cast
-from django.utils import timezone
-from datetime import datetime, timedelta
+from django.db.models import F
+from django.db.models import Q
+class MonitoringEmployeePagination(PageNumberPagination):
+    page_size = 10   # Number of notices per page
+    page_size_query_param = 'page_size'  # Optional: Allow the client to specify the page size
+    max_page_size = 100  # Max limit on page size
 
 class MonitoringEmployeeView(APIView):
     permission_classes = [AllowAny]
@@ -1098,7 +1127,6 @@ class MonitoringEmployeeView(APIView):
 
         super().initial(request, *args, **kwargs)
 
-    from django.db.models import Q
 
     def get(self, request, *args, **kwargs):
         """
@@ -1251,7 +1279,474 @@ class MonitoringEmployeeView(APIView):
                 usage_data[key] = f"{hours}:{minutes:02}:{seconds:02}"
         
         # Return the aggregated employee data
-        return Response({
-            "employee_app_usage": list(employee_app_usage.values())  # Return only the aggregated data for employees
-        })    
+        employee_app_usage_list = list(employee_app_usage.values())  # Convert dict to list for pagination
+        paginator = MonitoringEmployeePagination()
+        paginated_data = paginator.paginate_queryset(employee_app_usage_list, request)
+
+        # Return paginated response
+        return paginator.get_paginated_response(paginated_data) 
     
+
+
+
+
+#Screenshot section
+class Pagination_ScreenShotsMonitoring(PageNumberPagination):
+    page_size = 10  # Default page size
+    page_size_query_param = 'page_size'  # Allows client to specify page size
+    max_page_size = 100  # Maximum page size limit    
+
+class ScreenShotsMonitoringAPIView(APIView):
+    permission_classes = [AllowAny]
+
+    def initial(self, request, *args, **kwargs):
+        """
+        Validate the token and extract the organization_id.
+        """
+        auth_header = request.headers.get('Authorization', '')
+        if not auth_header:
+            return Response({"error": "Authorization token is required."}, status=status.HTTP_400_BAD_REQUEST)
+        
+        try:
+            token = auth_header.split(" ")[1]
+            access_token = AccessToken(token)
+            self.organization_id = access_token.get('organization_id')
+            
+            if not self.organization_id:
+                return Response({"error": "Organization ID not found in token."}, status=status.HTTP_401_UNAUTHORIZED)
+        
+        except IndexError:
+            return Response({"error": "Invalid token format. Please provide a valid 'Bearer <token>'."}, status=status.HTTP_400_BAD_REQUEST)
+        except TokenError as e:
+            return Response({"error": f"Token error: {str(e)}"}, status=status.HTTP_401_UNAUTHORIZED)
+        except Exception as e:
+            return Response({"error": f"Token decoding error: {str(e)}"}, status=status.HTTP_401_UNAUTHORIZED)
+        
+        super().initial(request, *args, **kwargs)
+
+
+    def get(self, request):
+        """
+        Retrieve screenshots based on date filters and include computer username.
+        """
+        start_date_str = request.query_params.get('start_date')
+        end_date_str = request.query_params.get('end_date')
+        employee_id = request.query_params.get('employee_id')  # Optional employee filter
+        computer_id = request.query_params.get('computer_id')  # Optional computer filter
+    
+        # Debugging: Print the received query parameters
+        print("Received start_date:", start_date_str)
+        print("Received end_date:", end_date_str)
+    
+        # Calculate date range with time adjustment
+        today = datetime.now().date()
+        if start_date_str:
+            start_date = datetime.strptime(start_date_str, "%Y-%m-%d")
+        else:
+            start_date = datetime.combine(today, datetime.min.time())
+        
+        if end_date_str:
+            end_date = datetime.strptime(end_date_str, "%Y-%m-%d") + timedelta(days=1) - timedelta(seconds=1)
+        else:
+            end_date = start_date + timedelta(days=1) - timedelta(seconds=1)
+    
+        # Debugging: Print the calculated date range
+        print("Start date (with time):", start_date)
+        print("End date (with time):", end_date)
+    
+        # Filter screenshots and annotate with computer username
+        screenshots = ScreenShotsMonitoring.objects.filter(
+            e_id__o_id=self.organization_id,
+            ssm_log_ts__range=[start_date, end_date]
+        ).annotate(
+            computer_username=F('c_id__c_username')  # Assumes a reverse relation from Employee to Computer
+        ).order_by('-ssm_log_ts')
+        if employee_id:
+             screenshots = screenshots.filter(e_id=employee_id)
+    
+        if computer_id:
+            screenshots = screenshots.filter(c_id=computer_id)
+    
+        # Debugging: Print the queryset
+        print("Screenshots QuerySet:", screenshots)
+    
+        # Apply pagination
+        paginator = Pagination_ScreenShotsMonitoring()
+        paginated_screenshots = paginator.paginate_queryset(screenshots, request)
+    
+        # Serialize the paginated data
+        serializer = ScreenShotsMonitoringSerializer(paginated_screenshots, many=True)
+    
+        # Return the paginated response
+        return paginator.get_paginated_response(serializer.data)
+    
+        
+    
+# webpage and applications section 
+
+
+def parse_time_to_seconds(time_str):
+    if not time_str or ":" not in time_str:
+        return 0
+    h, m, s = map(int, time_str.split(":"))
+    return h * 3600 + m * 60 + s
+
+       
+class Pagination_Webpage_and_applications(PageNumberPagination):
+    page_size = 10  # Default page size
+    page_size_query_param = 'page_size'  # Allows client to specify page size
+    max_page_size = 100  # Maximum page size limit    
+
+class Webpage_and_applicationsAPIView(APIView):
+    permission_classes = [AllowAny]
+
+    def initial(self, request, *args, **kwargs):
+        """
+        Validate the token and extract the organization_id.
+        Ensure the token is not expired.
+        """
+        auth_header = request.headers.get('Authorization', '')
+        if not auth_header:
+            raise AuthenticationFailed("Authorization token is required.")
+
+        try:
+            token = auth_header.split(" ")[1]
+            access_token = AccessToken(token)
+            self.organization_id = access_token.get('organization_id')
+
+            if not self.organization_id:
+                raise AuthenticationFailed("Organization ID not found in token.")
+
+            # Check token expiration
+            exp_timestamp = access_token.get('exp')
+            if not exp_timestamp:
+                raise AuthenticationFailed("Token expiration time not found.")
+
+            current_timestamp = datetime.now(pytz.UTC).timestamp()
+            if current_timestamp > exp_timestamp:
+                raise AuthenticationFailed("Token has expired. Please log in again.")
+
+        except IndexError:
+            raise AuthenticationFailed("Invalid token format. Please provide a valid 'Bearer <token>'.")
+        except TokenError as e:
+            raise AuthenticationFailed(f"Token error: {str(e)}")
+        except Exception as e:
+            raise AuthenticationFailed(f"Token decoding error: {str(e)}")
+
+        super().initial(request, *args, **kwargs)
+
+    def get(self, request):
+        """
+        Retrieve data based on date filters, aggregated employee-wise and app-wise.
+        Restrict data to the organization specified in the token.
+        """
+        # Ensure the `initial` method has set the organization_id
+        organization_id = getattr(self, 'organization_id', None)
+        if not organization_id:
+            return Response({"error": "Unauthorized access."}, status=status.HTTP_401_UNAUTHORIZED)
+        
+        # Get query parameters
+        start_date_str = request.query_params.get('start_date')
+        end_date_str = request.query_params.get('end_date')
+        employee_id = request.query_params.get('employee_id')  # Optional employee filter
+        computer_id = request.query_params.get('computer_id')  # Optional computer filter
+        app_or_webpage_id = request.query_params.get('app_or_webpage_id')  # Optional app/webpage filter
+        
+        # Parse dates
+        today = datetime.now().date()
+        if start_date_str:
+            start_date = datetime.strptime(start_date_str, "%Y-%m-%d")
+        else:
+            start_date = datetime.combine(today, datetime.min.time())
+    
+        if end_date_str:
+            end_date = datetime.strptime(end_date_str, "%Y-%m-%d") + timedelta(days=1) - timedelta(seconds=1)
+        else:
+            end_date = start_date + timedelta(days=1) - timedelta(seconds=1)
+    
+        # Filter Monitoring data by date range, organization, and optional filters
+        monitoring_queryset = Monitoring.objects.filter(
+            m_log_ts__range=(start_date, end_date),
+            e_id__o_id=organization_id  # Restrict to the organization in the token
+        )
+    
+        if employee_id:
+            monitoring_queryset = monitoring_queryset.filter(e_id=employee_id)
+    
+        if computer_id:
+            monitoring_queryset = monitoring_queryset.filter(e_id__computer__id=computer_id)
+    
+        if app_or_webpage_id:
+            monitoring_queryset = monitoring_queryset.filter(
+                m_title__in=AppProductivity.objects.filter(id=app_or_webpage_id).values_list('app_name', flat=True)
+            )
+    
+        # Fetch data and calculate total duration in seconds
+        response_data = []
+        employee_data = monitoring_queryset.select_related('e_id').values(
+            'e_id__e_name',  # Employee name
+            'm_title',  # App/Webpage
+            'm_url',  # URL
+            'e_id__computer__c_username',  # Computer name
+            'm_total_time_seconds',  # Include total time
+            'm_log_ts'  # Include the log timestamp
+        )
+    
+        # Get the total time for the employee across all apps/webpages
+        total_employee_time_seconds = sum(
+            parse_time_to_seconds(entry['m_total_time_seconds']) for entry in employee_data
+        )
+    
+        # Graph response to aggregate app/webpage usage time
+        graph_response = []
+    
+        # Calculate total time spent per app/webpage
+        app_data = {}
+        for entry in employee_data:
+            app_name = entry['m_title']
+            total_seconds = parse_time_to_seconds(entry['m_total_time_seconds'])
+    
+            if app_name not in app_data:
+                app_data[app_name] = 0
+            app_data[app_name] += total_seconds
+    
+        # Add aggregated app usage time to graph response
+        for app_name, total_seconds in app_data.items():
+            hours, remainder = divmod(total_seconds, 3600)
+            minutes, seconds = divmod(remainder, 60)
+            formatted_duration = f"{hours}h {minutes}m {seconds}s"
+    
+            graph_response.append({
+                'app_name': app_name,
+                'used_time': formatted_duration
+            })
+    
+        # Create employee-specific data
+        for entry in employee_data:
+            # Calculate total seconds for the current app/webpage for the current employee
+            durations = monitoring_queryset.filter(
+                e_id__e_name=entry['e_id__e_name'],
+                m_title=entry['m_title']  # Filter by the app/webpage title
+            ).values_list('m_total_time_seconds', flat=True)
+    
+            total_seconds = sum(parse_time_to_seconds(duration) for duration in durations)
+    
+            # Calculate percentage of time spent on this app/webpage
+            percentage = (total_seconds / total_employee_time_seconds) * 100 if total_employee_time_seconds > 0 else 0
+    
+            # Convert total seconds to HH:MM:SS format
+            hours, remainder = divmod(total_seconds, 3600)
+            minutes, seconds = divmod(remainder, 60)
+            formatted_duration = f"{hours}h {minutes}m {seconds}s"
+    
+            # Convert m_log_ts to a readable datetime format
+            log_datetime = datetime.strptime(entry['m_log_ts'], "%Y-%m-%d %H:%M:%S")  # Adjust format if needed
+            formatted_log_ts = log_datetime.strftime("%Y-%m-%d %H:%M:%S")
+    
+            response_data.append({
+                'employee_name': entry['e_id__e_name'],
+                'computer_name': entry.get('e_id__computer__c_username', 'N/A'),
+                'app_webpage': entry['m_title'],
+                'process_url': entry['m_url'],
+                'duration': formatted_duration,
+                'percentage': f"{percentage:.2f}%",  # Add percentage to the response
+                'log_timestamp': formatted_log_ts  # Add log timestamp to the response
+            })
+    
+        # Paginate response
+        paginator = Pagination_Webpage_and_applications()
+        paginated_data = paginator.paginate_queryset(response_data, request)
+        
+        # Return both the paginated employee data and the aggregated app usage data (graph response)
+        return Response({
+            'employee_data': paginator.get_paginated_response(paginated_data).data,
+            'graph_data': graph_response
+        })
+     
+
+
+
+#Screen vdo monitoring section
+
+class Pagination_ScreenVideoMonitoring(PageNumberPagination):
+    page_size = 10  # Default page size
+    page_size_query_param = 'page_size'  # Allows client to specify page size
+    max_page_size = 100  # Maximum page size limit    
+
+class ScreenVideoMonitoringAPIView(APIView):
+    permission_classes = [AllowAny]
+
+    def initial(self, request, *args, **kwargs):
+        """
+        Validate the token and extract the organization_id.
+        """
+        auth_header = request.headers.get('Authorization', '')
+        if not auth_header:
+            return Response({"error": "Authorization token is required."}, status=status.HTTP_400_BAD_REQUEST)
+        
+        try:
+            token = auth_header.split(" ")[1]
+            access_token = AccessToken(token)
+            self.organization_id = access_token.get('organization_id')
+            
+            if not self.organization_id:
+                return Response({"error": "Organization ID not found in token."}, status=status.HTTP_401_UNAUTHORIZED)
+        
+        except IndexError:
+            return Response({"error": "Invalid token format. Please provide a valid 'Bearer <token>'."}, status=status.HTTP_400_BAD_REQUEST)
+        except TokenError as e:
+            return Response({"error": f"Token error: {str(e)}"}, status=status.HTTP_401_UNAUTHORIZED)
+        except Exception as e:
+            return Response({"error": f"Token decoding error: {str(e)}"}, status=status.HTTP_401_UNAUTHORIZED)
+        
+        super().initial(request, *args, **kwargs)
+
+
+    def get(self, request):
+        """
+        Retrieve screenshots based on date filters and include computer username.
+        """
+        start_date_str = request.query_params.get('start_date')
+        end_date_str = request.query_params.get('end_date')
+        employee_id = request.query_params.get('employee_id')  # Optional employee filter
+        computer_id = request.query_params.get('computer_id')  # Optional computer filter
+    
+        # Debugging: Print the received query parameters
+        print("Received start_date:", start_date_str)
+        print("Received end_date:", end_date_str)
+    
+        # Calculate date range with time adjustment
+        today = datetime.now().date()
+        if start_date_str:
+            start_date = datetime.strptime(start_date_str, "%Y-%m-%d")
+        else:
+            start_date = datetime.combine(today, datetime.min.time())
+        
+        if end_date_str:
+            end_date = datetime.strptime(end_date_str, "%Y-%m-%d") + timedelta(days=1) - timedelta(seconds=1)
+        else:
+            end_date = start_date + timedelta(days=1) - timedelta(seconds=1)
+    
+        # Debugging: Print the calculated date range
+        print("Start date (with time):", start_date)
+        print("End date (with time):", end_date)
+    
+        # Filter screenvideo and annotate with computer username
+        screen_videos = ScreenVideoMonitoring.objects.filter(
+            e_id__o_id=self.organization_id,
+            svm_log_ts__range=[start_date, end_date]
+        ).annotate(
+            computer_username=F('c_id__c_username')  
+        ).order_by('-svm_log_ts')
+
+        if employee_id:
+             screen_videos = screen_videos.filter(e_id=employee_id)
+    
+        if computer_id:
+            screen_videos = screen_videos.filter(c_id=computer_id)
+    
+        # Debugging: Print the queryset
+        print("Screen video QuerySet:", screen_videos)
+    
+        # Apply pagination
+        paginator = Pagination_ScreenVideoMonitoring()
+        paginated_screenshots = paginator.paginate_queryset(screen_videos, request)
+    
+        # Serialize the paginated data
+        serializer = ScreenVideoMonitoringSerializer(paginated_screenshots, many=True)
+    
+        # Return the paginated response
+        return paginator.get_paginated_response(serializer.data)
+    
+
+
+#Keystrokes
+class Pagination_Keystrokes(PageNumberPagination):
+    page_size = 10  # Default page size
+    page_size_query_param = 'page_size'  # Allows client to specify page size
+    max_page_size = 100  # Maximum page size limit    
+
+class KeyStrokesAPIView(APIView):
+    permission_classes = [AllowAny]
+
+    def initial(self, request, *args, **kwargs):
+        """
+        Validate the token and extract the organization_id.
+        """
+        auth_header = request.headers.get('Authorization', '')
+        if not auth_header:
+            return Response({"error": "Authorization token is required."}, status=status.HTTP_400_BAD_REQUEST)
+        
+        try:
+            token = auth_header.split(" ")[1]
+            access_token = AccessToken(token)
+            self.organization_id = access_token.get('organization_id')
+            
+            if not self.organization_id:
+                return Response({"error": "Organization ID not found in token."}, status=status.HTTP_401_UNAUTHORIZED)
+        
+        except IndexError:
+            return Response({"error": "Invalid token format. Please provide a valid 'Bearer <token>'."}, status=status.HTTP_400_BAD_REQUEST)
+        except TokenError as e:
+            return Response({"error": f"Token error: {str(e)}"}, status=status.HTTP_401_UNAUTHORIZED)
+        except Exception as e:
+            return Response({"error": f"Token decoding error: {str(e)}"}, status=status.HTTP_401_UNAUTHORIZED)
+        
+        super().initial(request, *args, **kwargs)
+
+
+    def get(self, request):
+        """
+        Retrieve screenshots based on date filters and include computer username.
+        """
+        start_date_str = request.query_params.get('start_date')
+        end_date_str = request.query_params.get('end_date')
+        employee_id = request.query_params.get('employee_id')  # Optional employee filter
+        computer_id = request.query_params.get('computer_id')  # Optional computer filter
+    
+        # Debugging: Print the received query parameters
+        print("Received start_date:", start_date_str)
+        print("Received end_date:", end_date_str)
+    
+        # Calculate date range with time adjustment
+        today = datetime.now().date()
+        if start_date_str:
+            start_date = datetime.strptime(start_date_str, "%Y-%m-%d")
+        else:
+            start_date = datetime.combine(today, datetime.min.time())
+        
+        if end_date_str:
+            end_date = datetime.strptime(end_date_str, "%Y-%m-%d") + timedelta(days=1) - timedelta(seconds=1)
+        else:
+            end_date = start_date + timedelta(days=1) - timedelta(seconds=1)
+    
+        # Debugging: Print the calculated date range
+        print("Start date (with time):", start_date)
+        print("End date (with time):", end_date)
+    
+        # Filter screenvideo and annotate with computer username
+        all_strokes = Keystroke.objects.filter(
+            e_id__o_id=self.organization_id,
+            activity_timestamp__range=[start_date, end_date]
+        ).annotate(
+            computer_username=F('c_id__c_username')  
+        ).order_by('-svm_log_ts')
+
+        if employee_id:
+             screen_videos = screen_videos.filter(e_id=employee_id)
+    
+        if computer_id:
+            screen_videos = screen_videos.filter(c_id=computer_id)
+    
+        # Debugging: Print the queryset
+        print("Screen video QuerySet:", screen_videos)
+    
+        # Apply pagination
+        paginator = Pagination_ScreenVideoMonitoring()
+        paginated_screenshots = paginator.paginate_queryset(screen_videos, request)
+    
+        # Serialize the paginated data
+        serializer = ScreenVideoMonitoringSerializer(paginated_screenshots, many=True)
+    
+        # Return the paginated response
+        return paginator.get_paginated_response(serializer.data)

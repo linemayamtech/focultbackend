@@ -40,6 +40,19 @@ urlpatterns = [
 
 
 
+
+    #ScreenShotsMonitoring
+    path('display_screenshots_data/', ScreenShotsMonitoringAPIView.as_view(), name='display_screenshots_data'), 
+
+    # webpage and applications date based section 
+    path('display_webpage_and_application_data_get_date_based/', Webpage_and_applicationsAPIView.as_view(), name='display_webpage_and_application_data'),
+
+  
+    #Screen video Monitoring
+    path('display_screen_video_data/', ScreenVideoMonitoringAPIView.as_view(), name='display_screen_video_data'), 
+
+
+
 ]
 
 

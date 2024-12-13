@@ -301,3 +301,24 @@ class MonitoringSerializer(serializers.ModelSerializer):
     class Meta:
         model = Monitoring
         fields = '__all__'  # Include all fields, or specify the ones you need explicitly
+
+
+class ScreenShotsMonitoringSerializer(serializers.ModelSerializer):
+    # Adding employee details and computer username to the serializer
+    uploaded_by = serializers.CharField(source='e_id.e_name')  # Employee name
+    
+
+    class Meta:
+        model = ScreenShotsMonitoring
+        fields = ['ssm_img', 'ssm_log_ts','c_id', 'uploaded_by']
+
+
+
+
+class ScreenVideoMonitoringSerializer(serializers.ModelSerializer):
+    # Adding employee details 
+    uploaded_by = serializers.CharField(source='e_id.e_name')  # Employee name
+
+    class Meta:
+        model = ScreenVideoMonitoring
+        fields = ['svm_vdo', 'svm_log_ts','c_id', 'uploaded_by']

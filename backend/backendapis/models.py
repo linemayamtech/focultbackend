@@ -154,10 +154,45 @@ class Monitoring(models.Model):
     m_process= models.CharField(max_length=200, null=True)
     m_url = models.TextField(blank=True, null=True)
     m_log_ts = models.CharField(max_length=200)
-    m_total_time_seconds = models.CharField(max_length=200, null=True) # Allow null values
+    m_total_time_seconds = models.CharField(max_length=200, null=True) # Allow null values  
     e_id = models.ForeignKey(Employee, on_delete=models.CASCADE)
     # o_id = models.ForeignKey(Organization, on_delete=models.CASCADE)   #commented by abhi
 
     class Meta:
        db_table = "monitoring"
+
+class Computer(models.Model):
+    c_log_ts = models.CharField(max_length=200) # computer login time
+    c_ip_address = models.GenericIPAddressField()#ip address of computer
+    c_system_status = models.CharField(max_length=50, default='no')
+    c_operating_system = models.CharField(max_length=255)
+    c_username = models.CharField(max_length=255)#computer username
+    c_host_name = models.CharField(max_length=100)
+    uuid = models.CharField(max_length=50, default='unknown uuid',editable=False) # 
+    #o_id = models.ForeignKey(Organization, on_delete=models.CASCADE ,null=True) #commented by abhi
+    e_id = models.ForeignKey(Employee, on_delete=models.CASCADE,null=True) #remove pushing time null =true
+
+    class Meta:
+        db_table = "Computer"
+
+
+class ScreenShotsMonitoring(models.Model):
+    ssm_img = models.CharField(max_length=255)
+    ssm_log_ts = models.CharField(max_length=200)
+    e_id = models.ForeignKey(Employee, on_delete=models.CASCADE)
+    c_id = models.ForeignKey(Computer, on_delete=models.CASCADE ,null=True) #created by abhi  remove null = true  on after test
+    # o_id = models.ForeignKey(Organization, on_delete=models.CASCADE)  #commented by abhi
+
+    class Meta:
+        db_table = "ScreenShotsMonitoring"
+
+#for screen video storing  svm= screen video monitoring
+class ScreenVideoMonitoring(models.Model):
+    svm_vdo = models.CharField(max_length=255)    
+    svm_log_ts = models.CharField(max_length=200)   
+    e_id = models.ForeignKey(Employee, on_delete=models.CASCADE)
+    c_id = models.ForeignKey(Computer, on_delete=models.CASCADE)
+    
+
+
 
